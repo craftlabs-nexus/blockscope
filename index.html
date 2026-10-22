@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Blockscope</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <meta name="description" content="Minecraft schematics with modded blocks, drawn in your browser from a resource pack built from Mojang's and Modrinth's own downloads." />
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #1a1d22;
+      --panel: rgba(22, 24, 29, .92);
+      --raised: rgba(255, 255, 255, .055);
+      --raised-hover: rgba(255, 255, 255, .11);
+      --line: #363b43;
+      --line-soft: #272b32;
+      --fg: #e4e6ea;
+      --fg-dim: #7f8793;
+      --fg-key: #a3aab5;
+      --accent: #6fb3ff;
+      --accent-bg: rgba(111, 179, 255, .16);
+      --accent-line: rgba(111, 179, 255, .55);
+      --ok: #8fcf8f;
+      --warn: #f0c36d;
+      --err: #ff8a8a;
+      --north: #ff6b6b;
+      --mono: ui-monospace, Consolas, "Cascadia Mono", monospace;
+      --hud-w: 292px;
+      --r: 6px;
+    }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 12.5px/1.4 system-ui, sans-serif; overflow: hidden; }
+    #canvas { width: 100vw; height: 100vh; display: block; touch-action: none; }
+    code { font-family: var(--mono); font-size: 12px; }
+    ::-webkit-scrollbar { width: 8px; } ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+
+    /* The panel: a fixed width, the header and status always in view, the groups scrolling under them. */
+    #hud { position: fixed; top: 10px; left: 10px; width: var(--hud-w); max-height: calc(100vh - 20px); display: flex; flex-direction: column;
+           background: var(--panel); border: 1px solid var(--line); border-radius: 9px; box-shadow: 0 8px 28px rgba(0, 0, 0, .45); backdrop-filter: blur(8px); }
+    #hud > .body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+    #hud.collapsed > .body { display: none; }
+    #hud.collapsed { width: auto; max-width: var(--hud-w); }
+
+    /* Header: collapse button, title + file name, compass */
+    .head { flex: none; display: grid; grid-template-columns: 22px minmax(0, 1fr) 44px; align-items: center; gap: 8px; padding: 8px 10px 6px; }
+    .head h1 { margin: 0; font-size: 10px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--fg-dim); }
+    #schemName { display: block; font: 12.5px/1.3 var(--mono); color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #hudToggle { width: 22px; height: 22px; padding: 0; font-size: 11px; color: var(--fg-dim); border-color: transparent; background: transparent; }
+    #hudToggle::before { content: "\25BE"; }
+    #hud.collapsed #hudToggle::before { content: "\25B8"; }
+    #compass { width: 44px; height: 44px; display: block; cursor: pointer; }
+    #compass circle { fill: var(--raised); stroke: var(--line); stroke-width: 1.5; }
+    #compass .tick { stroke: var(--fg-dim); stroke-width: 2; }
+    #compass text { fill: var(--fg); font: bold 17px system-ui, sans-serif; text-anchor: middle; dominant-baseline: central; }
+    #compass .n { fill: var(--north); }
+    #compass .needle { stroke: var(--north); stroke-width: 3; stroke-linecap: round; }
+
+    /* Status row: the message, and on the right a warning chip when the pack cannot draw something */
+    #statusRow { flex: none; display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-top: 1px solid var(--line-soft); }
+    #status { flex: 1 1 auto; min-width: 0; font-size: 11.5px; color: var(--fg-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #status.busy { color: var(--ok); }
+    #status.err { color: var(--err); }
+    #unknownChip { display: none; flex: none; height: 18px; padding: 0 7px; font-size: 11px; border-color: rgba(240, 195, 109, .4); background: rgba(240, 195, 109, .12); color: var(--warn); }
+    #unknownChip.on { display: inline-flex; }
+
+    /* Groups: each is a <details> with a heading row; the open state is remembered. */
+    .grp { margin: 0; border-top: 1px solid var(--line-soft); }
+    .grp > summary { list-style: none; display: flex; align-items: center; gap: 6px; padding: 6px 10px; cursor: pointer; user-select: none; }
+    .grp > summary::-webkit-details-marker { display: none; }
+    .grp > summary::before { content: "\25B8"; width: 9px; font-size: 9px; color: var(--fg-dim); }
+    .grp[open] > summary::before { content: "\25BE"; }
+    .grp > summary:hover { background: var(--raised); }
+    .grp > summary h2 { margin: 0; flex: 1 1 auto; font-size: 10px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--fg-dim); display: flex; align-items: center; gap: 6px; }
+    .grp > summary .sum { font-size: 11px; color: var(--fg-dim); font-weight: 400; text-transform: none; letter-spacing: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .grp > .in { padding: 2px 10px 9px; }
+    .hint { margin: 6px 0 0; font-size: 11px; color: var(--fg-dim); }
+    .hint b, .hint kbd { color: var(--fg-key); }
+
+    /* Buttons: short labels; the explanation and the shortcut are the tooltip. A pressed button is the active state. */
+    button, .btn { box-sizing: border-box; font: inherit; font-size: 12px; line-height: 1; color: var(--fg); background: var(--raised); border: 1px solid var(--line);
+                   border-radius: 5px; padding: 0 8px; height: 25px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; cursor: pointer;
+                   white-space: nowrap; user-select: none; }
+    button:hover, .btn:hover { background: var(--raised-hover); border-color: #474d56; }
+    button:active { transform: translateY(1px); }
+    button:focus-visible, .btn:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+    button[aria-pressed="true"] { color: #fff; background: var(--accent-bg); border-color: var(--accent-line); }
+    button:disabled { opacity: .4; cursor: default; }
+    .icon { width: 25px; padding: 0; font-size: 11px; }
+    /* Segmented group: one strip of equal cells, the active cell filled */
+    .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+    .seg.fill { display: flex; }
+    .seg button { flex: 1 1 0; border: 0; border-radius: 0; border-left: 1px solid var(--line); background: transparent; }
+    .seg button:first-child { border-left: 0; }
+    .seg button:hover { background: var(--raised-hover); }
+    .seg button[aria-pressed="true"] { background: var(--accent-bg); box-shadow: inset 0 -2px 0 var(--accent); }
+    /* Toggle: an indicator dot that lights up when on */
+    .toggle::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--fg-dim); flex: none; }
+    .toggle[aria-pressed="true"]::before { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+    /* The view toolbar: fit, camera, shell toggles, screenshot, help in two tight rows */
+    .bar { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+    .bar .sp { flex: 1 1 auto; }
+    #simRun { min-width: 60px; }
+
+    /* Layers: the mode strip, then a slider between the step buttons with the current world y, and the range shown */
+    .slider { display: flex; align-items: center; gap: 6px; margin-top: 7px; }
+    .slider input[type="range"] { flex: 1 1 auto; min-width: 0; height: 25px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+    .slider input[type="range"]:disabled { opacity: .35; cursor: default; }
+    .slider .num { flex: none; min-width: 42px; text-align: right; font: 12px var(--mono); color: var(--fg); }
+    .slider .num.dim { color: var(--fg-dim); }
+    .range { display: flex; justify-content: space-between; margin-top: 4px; font-size: 11px; color: var(--fg-dim); }
+    .range .mono { font-family: var(--mono); }
+
+    /* Parts: a filter box, then one row per part: eye (shown or hidden), name, count, solo. Hovering a row lights the
+       part in the view; a hidden part reads dim. */
+    #partFilter { box-sizing: border-box; flex: 1 1 auto; min-width: 0; height: 25px; padding: 0 8px; font: inherit; font-size: 12px; color: var(--fg); background: var(--raised); border: 1px solid var(--line); border-radius: 5px; outline: none; }
+    #partFilter:focus { border-color: var(--accent-line); }
+    #partFilter::placeholder { color: var(--fg-dim); }
+    .parts { display: flex; flex-direction: column; margin: 6px -4px 0; }
+    .part { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto 34px; align-items: center; gap: 4px; height: 24px; padding: 0 4px; border-radius: 4px; cursor: default; }
+    .part:hover, .part.sel { background: var(--raised); }
+    .part.hid .nm, .part.hid .cnt { color: var(--fg-dim); }
+    .part .eye { width: 22px; height: 22px; padding: 0; background: transparent; border-color: transparent; color: var(--fg-key); font-size: 13px; }
+    .part .eye::before { content: "\25C9"; }
+    .part.hid .eye::before { content: "\25CB"; }
+    .part .eye:hover { background: var(--raised-hover); }
+    .part .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+    .part .cnt { font: 11px var(--mono); color: var(--fg-dim); }
+    .part .solo { height: 20px; padding: 0 6px; font-size: 10.5px; color: var(--fg-key); background: transparent; border-color: transparent; }
+    .part:hover .solo { border-color: var(--line); }
+    .part .solo[aria-pressed="true"] { color: #fff; background: var(--accent-bg); border-color: var(--accent-line); }
+    .part.none { display: none; }
+
+    /* Properties: a key/value list with only the rows that have something to say. */
+    .props { display: grid; grid-template-columns: 52px minmax(0, 1fr); column-gap: 8px; row-gap: 3px; align-items: start; margin-top: 2px; }
+    .props .k { font-size: 11px; color: var(--fg-key); line-height: 19px; }
+    .props .v { min-width: 0; line-height: 19px; overflow-wrap: anywhere; }
+    .props .v.mono { font-family: var(--mono); font-size: 12px; }
+    .props .v.dim { color: var(--fg-dim); }
+    .props .v.scroll { max-height: 150px; overflow-y: auto; scrollbar-width: thin; }
+    .props .v.chips { display: flex; flex-wrap: wrap; gap: 2px 8px; }
+    .kv { display: inline-flex; gap: 4px; font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+    .kv .kk { color: var(--fg-key); font-family: system-ui, sans-serif; font-size: 11px; }
+    .props .v .lnk { color: var(--accent); cursor: pointer; text-decoration: none; }
+    .props .v .lnk:hover { text-decoration: underline; }
+    .empty { margin: 2px 0 0; font-size: 11.5px; color: var(--fg-dim); }
+
+    /* File group */
+    .sr { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; pointer-events: none; }
+    details.sub { margin-top: 6px; }
+    details.sub > summary { cursor: pointer; font-size: 11.5px; color: var(--fg-key); list-style-position: inside; }
+    details.sub > summary:hover { color: var(--fg); }
+    .badge { display: inline-block; min-width: 16px; padding: 0 5px; border-radius: 9px; background: var(--raised); color: var(--fg-dim); font: 10.5px/16px system-ui, sans-serif; text-align: center; }
+    .badge.warn { background: rgba(240, 195, 109, .18); color: var(--warn); }
+    .subbody { margin: 4px 0 0 12px; font-size: 11.5px; max-height: 150px; overflow: auto; scrollbar-width: thin; }
+    .subbody ul { margin: 4px 0 0 14px; padding: 0; }
+    .subbody p { margin: 4px 0 0; }
+    #unknown { color: var(--warn); font-family: var(--mono); white-space: pre-wrap; word-break: break-all; }
+    kbd { font: 10.5px/1 var(--mono); color: var(--fg-key); background: var(--raised); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 3px; padding: 2px 4px; }
+
+    /* Hover tooltip: follows the cursor, says what the block under it is */
+    #tip { position: fixed; z-index: 5; pointer-events: none; display: none; max-width: 300px; padding: 5px 8px; border-radius: 5px;
+           background: rgba(16, 18, 22, .94); border: 1px solid var(--line); box-shadow: 0 4px 14px rgba(0, 0, 0, .4); font-size: 11.5px; line-height: 1.35; }
+    #tip.on { display: block; }
+    #tip .id { font-family: var(--mono); font-size: 12px; color: var(--fg); white-space: nowrap; }
+    #tip .st { color: var(--fg-dim); font-family: var(--mono); font-size: 11px; }
+    #tip .pt { color: var(--fg-key); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #tip .pos { color: var(--fg-dim); font-family: var(--mono); font-size: 11px; }
+
+    /* Help: a sheet over the view with the mouse and keyboard reference, toggled with ? */
+    #help { position: fixed; z-index: 6; right: 12px; top: 12px; width: 320px; max-width: calc(100vw - 24px); max-height: calc(100vh - 24px); overflow: auto; display: none;
+            padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 9px; box-shadow: 0 8px 28px rgba(0, 0, 0, .45); backdrop-filter: blur(8px); }
+    #help.on { display: block; }
+    #help h3 { margin: 0 0 6px; font-size: 10px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--fg-dim); }
+    #help h3:not(:first-child) { margin-top: 10px; }
+    #help .x { position: absolute; right: 8px; top: 8px; width: 22px; height: 22px; padding: 0; border-color: transparent; background: transparent; color: var(--fg-dim); }
+    .keys { display: grid; grid-template-columns: auto 1fr; column-gap: 10px; row-gap: 4px; margin: 0; font-size: 11.5px; color: var(--fg-key); align-items: center; }
+    .keys dt { white-space: nowrap; text-align: right; }
+    .keys dd { margin: 0; }
+
+    /* Pack progress: a bar and a line under the status while the pack is built */
+    #packRow { flex: none; display: flex; flex-direction: column; gap: 3px; padding: 4px 10px 6px; border-top: 1px solid var(--line-soft); }
+    #packRow[hidden] { display: none; }
+    #packBar { width: 100%; height: 6px; accent-color: var(--accent); }
+    #packText { font-size: 11px; color: var(--fg-key); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .packbar { margin-top: 6px; }
+    .dim { color: var(--fg-dim); }
+    #packInfo ul { margin: 4px 0 0 14px; padding: 0; }
+    /* The consent sheet before the first download */
+    #consent { position: fixed; z-index: 8; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 420px; max-width: calc(100vw - 32px); box-sizing: border-box;
+               padding: 16px 18px; background: var(--panel); border: 1px solid var(--line); border-radius: 9px; box-shadow: 0 12px 40px rgba(0, 0, 0, .6); backdrop-filter: blur(8px); }
+    #consent[hidden] { display: none; }
+    #consent h2 { margin: 0 0 8px; font-size: 14px; }
+    #consent p { margin: 0 0 10px; font-size: 12.5px; }
+    #consent .bar { gap: 8px; }
+    /* Dropping a file */
+    #dropHint { position: fixed; inset: 0; z-index: 7; display: grid; place-items: center; background: rgba(26, 29, 34, .7); pointer-events: none; }
+    #dropHint[hidden] { display: none; }
+    #dropHint div { padding: 18px 26px; border: 2px dashed var(--accent-line); border-radius: 12px; color: var(--fg); font-size: 14px; background: var(--panel); }
+    /* Footer: the sources, where the assets come from, Mojang's line */
+    #footer { position: fixed; right: 10px; bottom: 8px; z-index: 4; max-width: min(560px, calc(100vw - 20px)); display: flex; flex-direction: column; align-items: flex-end; gap: 1px;
+              font-size: 10.5px; line-height: 1.35; color: var(--fg-dim); text-align: right; }
+    #footer a { color: var(--fg-key); }
+    #footer a:hover { color: var(--accent); }
+
+    @media (max-width: 480px) { :root { --hud-w: calc(100vw - 20px); } }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <aside id="hud" aria-label="viewer controls">
+    <div class="head">
+      <button id="hudToggle" type="button" aria-expanded="true" aria-controls="hudBody" title="Collapse or expand the panel (H)"></button>
+      <div>
+        <h1>Blockscope</h1>
+        <code id="schemName" title="the schematic shown">—</code>
+      </div>
+      <svg id="compass" viewBox="-42 -42 84 84" aria-label="compass: the rose turns with the camera; north is -z, as in the game; click to look north (N)">
+        <title>The rose turns with the camera; north is -z, as in the game. Click to look north (N).</title>
+        <circle r="40" />
+        <g id="compassRose">
+          <line class="tick" x1="0" y1="30" x2="0" y2="38" /><line class="tick" x1="30" y1="0" x2="38" y2="0" /><line class="tick" x1="-30" y1="0" x2="-38" y2="0" />
+          <line class="needle" x1="0" y1="0" x2="0" y2="-24" />
+          <text class="n" x="0" y="-31">N</text><text x="22" y="0">E</text><text x="0" y="22">S</text><text x="-22" y="0">W</text>
+        </g>
+      </svg>
+    </div>
+    <div id="statusRow">
+      <div id="status" title="status">starting…</div>
+      <button id="unknownChip" type="button" title="Blocks the pack cannot draw (drawn as purple wireframes); opens the list in the File group">0 undrawn</button>
+    </div>
+    <div id="packRow" hidden><progress id="packBar"></progress><span id="packText"></span></div>
+    <div class="body" id="hudBody">
+      <details class="grp" id="viewGrp" open>
+        <summary><h2>View</h2></summary>
+        <div class="in bar">
+          <button id="focus" title="Fit the whole schematic in view (F)">Fit</button>
+          <span class="seg" role="group" aria-label="camera">
+            <button id="persp" aria-pressed="true" title="Perspective camera (P)">Persp</button>
+            <button id="iso" aria-pressed="false" title="Isometric camera (I)">Iso</button>
+          </span>
+          <span class="sp"></span>
+          <button id="shot" title="Download a 1600×1000 render as a PNG">Shot</button>
+          <button id="buildGif" aria-pressed="false" title="Save an animated GIF of the build going up a layer at a time from the bottom, with the parts, roof, walls and floor shown now, seen from this direction and framed so the finished build fills the image (downloaded as &lt;name&gt;-build.gif); click again to stop">Build</button>
+          <button id="helpBtn" class="icon" title="Mouse and keyboard reference (?)">?</button>
+          <span class="seg" role="group" aria-label="shell: show or hide the roof, the walls and the floor (inert building blocks only, never a functional block)">
+            <button id="shell-roof" class="toggle" aria-pressed="false" title="Show or hide the roof (R)">Roof</button>
+            <button id="shell-wall" class="toggle" aria-pressed="true" title="Show or hide the walls">Walls</button>
+            <button id="shell-floor" class="toggle" aria-pressed="true" title="Show or hide the floor">Floor</button>
+          </span>
+        </div>
+      </details>
+      <details class="grp" id="layersGrp" open>
+        <summary><h2>Layers <span class="sum" id="layerSum"></span></h2></summary>
+        <div class="in">
+          <div class="seg fill" role="group" aria-label="layer mode">
+            <button id="layerAll" aria-pressed="true" title="Every layer; the roof toggle applies (1)">All</button>
+            <button id="layerSingle" aria-pressed="false" title="Only the current layer (2)">Single</button>
+            <button id="layerBelow" aria-pressed="false" title="The current layer and everything below it (3)">Below</button>
+            <button id="layerAbove" aria-pressed="false" title="The current layer and everything above it (4)">Above</button>
+          </div>
+          <div class="slider">
+            <button id="layerDown" class="icon" title="One layer down (PageDown or [)">&#9660;</button>
+            <input id="layerSlider" type="range" min="0" max="0" value="0" step="1" title="The current layer; drag, or step with the arrows" />
+            <button id="layerUp" class="icon" title="One layer up (PageUp or ])">&#9650;</button>
+            <span class="num dim" id="layerY" title="world y of the current layer">—</span>
+          </div>
+          <div class="range"><span id="layerRange" class="mono" title="world y range on screen">—</span><span id="layerHidden"></span></div>
+        </div>
+      </details>
+      <details class="grp" id="partsGrp" open>
+        <summary title="The file's parts, from the generator's metadata: hover to light one up, click the eye to hide it, solo to see it alone, double-click to fly to it"><h2>Parts <span class="badge" id="partsCount">0</span></h2></summary>
+        <div class="in">
+          <div class="bar">
+            <input id="partFilter" type="search" placeholder="filter parts…" autocomplete="off" spellcheck="false" />
+            <button id="partsAll" title="Show every part again">All</button>
+          </div>
+          <div class="parts" id="parts"></div>
+        </div>
+      </details>
+      <details class="grp" id="inspectGrp" open>
+        <summary><h2>Block <span class="sum" id="inspectSum"></span></h2></summary>
+        <div class="in">
+          <div class="props" id="props"></div>
+          <p class="empty" id="propsEmpty">Click a block to see what it is; hover shows the short form. <kbd>Esc</kbd> clears.</p>
+        </div>
+      </details>
+      <details class="grp" id="simGrp">
+        <summary title="Redstone simulation (open the page with ?sim=on)"><h2>Redstone <span class="sum" id="simSum"></span></h2></summary>
+        <div class="in">
+          <div class="bar">
+            <button id="simStart" title="Compile the loaded file into the simulator (the page must be opened with ?sim=on)">Simulate</button>
+            <button id="simTick" title="Advance one redstone tick">Tick</button>
+            <button id="simRun" aria-pressed="false" title="Tick continuously at 20 per second">Run</button>
+          </div>
+          <p class="hint" id="simInfo">—</p>
+        </div>
+      </details>
+      <details class="grp" id="fileGrp">
+        <summary><h2>File <span class="sum" id="fileSum"></span></h2></summary>
+        <div class="in">
+          <div class="bar">
+            <label class="btn" for="file" title="Open a .schem, .schematic, .litematic or structure .nbt; it stays in this page, nothing is uploaded">Open…</label>
+            <input id="file" class="sr" type="file" accept=".schem,.schematic,.litematic,.nbt" />
+            <button id="copyLink" title="Copy a link to this view: file, camera, layers and hidden parts">Copy link</button>
+          </div>
+          <p class="hint">or drop a schematic, a resource pack .zip, or your modpack (folder, .mrpack, CurseForge zip) on the page</p>
+          <details class="sub" id="packDetails"><summary>Resource pack <span class="sum" id="packSum"></span></summary>
+            <div class="subbody">
+              <div id="packInfo">not built yet</div>
+              <div class="bar packbar">
+                <label class="btn" for="packFolder" title="Your launcher instance or mods folder: its mods are read in this page">Your mods folder…</label>
+                <input id="packFolder" class="sr" type="file" webkitdirectory multiple />
+                <label class="btn" for="packFile" title="A Modrinth .mrpack or a CurseForge zip">Your pack file…</label>
+                <input id="packFile" class="sr" type="file" accept=".mrpack,.zip" />
+                <button id="packDefault" title="Back to the Gaming Grudge pack">Gaming Grudge</button>
+              </div>
+              <div class="bar packbar">
+                <button id="packForget" title="Delete the downloaded jars and built packs this browser keeps for Blockscope">Forget downloads</button>
+                <span class="dim" id="packUsage"></span>
+              </div>
+            </div>
+          </details>
+          <details class="sub" id="unknownDetails"><summary>Blocks the pack cannot draw <span class="badge" id="unknownCount">0</span></summary><div id="unknown" class="subbody">(none so far)</div></details>
+        </div>
+      </details>
+    </div>
+  </aside>
+  <div id="consent" role="dialog" aria-modal="true" aria-labelledby="consentTitle" hidden>
+    <h2 id="consentTitle">Build the resource pack?</h2>
+    <p id="consentText"></p>
+    <p class="dim">Blockscope draws blocks with the game's own textures. Your browser downloads the Minecraft client jar from Mojang and the mods' jars from Modrinth, checks their hashes and keeps them in this browser for the next visit. Nothing is uploaded.</p>
+    <div class="bar">
+      <button id="consentYes" aria-pressed="true">Download</button>
+      <label class="btn" for="packFolder2" title="Your launcher instance or mods folder instead of the Gaming Grudge pack">Use my mods folder…</label>
+      <input id="packFolder2" class="sr" type="file" webkitdirectory multiple />
+      <button id="consentNo">Not now</button>
+    </div>
+  </div>
+  <div id="dropHint" hidden><div>Drop a schematic, a resource pack, or your modpack</div></div>
+  <footer id="footer">
+    <span>Blockscope, <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener">AGPL-3.0</a>: source of
+      <a href="https://github.com/craftlabs-nexus/blockscope" target="_blank" rel="noopener">the app</a>,
+      <a href="https://github.com/craftlabs-nexus/schematic-renderer" target="_blank" rel="noopener">the renderer</a> and
+      <a href="https://github.com/craftlabs-nexus/packrat" target="_blank" rel="noopener">the pack reader</a>.</span>
+    <span>Game assets are downloaded by your browser from Mojang (the Minecraft client) and Modrinth (the mods), never served from here.</span>
+    <span>Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft.</span>
+  </footer>
+  <div id="tip" role="tooltip"><div class="id"></div><div class="st"></div><div class="pt"></div><div class="pos"></div></div>
+  <div id="help" role="dialog" aria-label="mouse and keyboard reference">
+    <button class="x" id="helpClose" title="Close (Esc)">&#10005;</button>
+    <h3>Mouse</h3>
+    <dl class="keys">
+      <dt><kbd>drag</kbd></dt><dd>orbit around what is in front of you</dd>
+      <dt><kbd>wheel</kbd></dt><dd>zoom toward the cursor</dd>
+      <dt><kbd>right drag</kbd></dt><dd>look around (first person)</dd>
+      <dt><kbd>middle drag</kbd> <kbd>Ctrl</kbd>+<kbd>drag</kbd></dt><dd>pan</dd>
+      <dt><kbd>click</kbd></dt><dd>pin the block in the panel</dd>
+      <dt><kbd>double-click</kbd></dt><dd>orbit around that block</dd>
+      <dt><kbd>touch</kbd></dt><dd>one finger orbits, two zoom and pan</dd>
+    </dl>
+    <h3>Keyboard</h3>
+    <dl class="keys">
+      <dt><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></dt><dd>fly (also while dragging)</dd>
+      <dt><kbd>Space</kbd> / <kbd>Shift</kbd></dt><dd>up / down</dd>
+      <dt><kbd>F</kbd></dt><dd>fit the schematic</dd>
+      <dt><kbd>N</kbd></dt><dd>look north</dd>
+      <dt><kbd>P</kbd> <kbd>I</kbd></dt><dd>perspective, isometric</dd>
+      <dt><kbd>R</kbd></dt><dd>roof on / off</dd>
+      <dt><kbd>1</kbd>–<kbd>4</kbd></dt><dd>layers: all, single, below, above</dd>
+      <dt><kbd>PgUp</kbd> <kbd>PgDn</kbd> or <kbd>[</kbd> <kbd>]</kbd></dt><dd>step a layer</dd>
+      <dt><kbd>Esc</kbd></dt><dd>unpin the block, close this</dd>
+      <dt><kbd>H</kbd></dt><dd>collapse the panel</dd>
+      <dt><kbd>?</kbd></dt><dd>this reference</dd>
+      <dt><kbd>Ctrl</kbd>+<kbd>\</kbd></dt><dd>the renderer's own sidebar (render settings, slicer, export)</dd>
+    </dl>
+    <h3>Parts</h3>
+    <dl class="keys">
+      <dt><kbd>hover</kbd></dt><dd>lights the part up in the view</dd>
+      <dt><kbd>eye</kbd></dt><dd>hide or show it</dd>
+      <dt><kbd>solo</kbd></dt><dd>see it alone; again shows all</dd>
+      <dt><kbd>double-click</kbd></dt><dd>fly to it</dd>
+    </dl>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
