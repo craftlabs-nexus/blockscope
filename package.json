@@ -1,0 +1,28 @@
+{
+  "name": "blockscope",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "description": "A static schematic viewer: Minecraft schematics with modded blocks, drawn from a resource pack built in the browser from Mojang's and Modrinth's own downloads",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/craftlabs-nexus/blockscope.git"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@craftlabs/packrat": "^0.2.0",
+    "@craftlabs/schematic-renderer": "^1.7.0",
+    "gif.js.optimized": "^1.0.1",
+    "jszip": "^3.10.2",
+    "three": "^0.184.0"
+  },
+  "devDependencies": {
+    "vite": "^7.3.7"
+  }
+}

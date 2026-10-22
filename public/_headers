@@ -1,0 +1,5 @@
+# Cloudflare Pages: cross-origin isolation (the renderer's worker pool may use SharedArrayBuffer); every resource the
+# page loads from elsewhere (Mojang, Modrinth, the plan files) is read with CORS, which this allows.
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp

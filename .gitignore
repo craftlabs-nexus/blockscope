@@ -1,0 +1,4 @@
+node_modules/
+dist/
+# a local override of where the dev server finds the plan files
+.env.local
