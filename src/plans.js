@@ -7,8 +7,8 @@ export const PLANS_BASE = import.meta.env.VITE_PLANS_BASE || "/plans/";
 // the origins a ?schem= URL may point at besides the page's own (they must allow cross-origin reads)
 export const ALLOWED_ORIGINS = ["https://gg.craftlabs.nexus", ...(import.meta.env.VITE_ALLOWED_ORIGINS ?? "").split(",").filter(Boolean)];
 // the file opened without ?schem=: the hall in development (the dev server has the plan folder); none in a build until
-// VITE_DEFAULT_PLAN names one, since a host with no plan files answers a missing path with the page itself (Cloudflare
-// Pages serves index.html for unknown paths)
+// VITE_DEFAULT_PLAN names one (the deployed site has no plan files of its own; some hosts even answer a missing path
+// with the page itself)
 export const DEFAULT_PLAN = import.meta.env.VITE_DEFAULT_PLAN ?? (import.meta.env.DEV ? "storage-hall.schem" : "");
 export const SCHEMATIC_EXT = /\.(schem|schematic|litematic|nbt)$/i;
 

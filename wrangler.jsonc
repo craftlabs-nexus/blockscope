@@ -1,0 +1,11 @@
+// Cloudflare Workers, static assets only (no Worker script): `npm run build` writes dist/, `npx wrangler deploy`
+// serves it. public/_headers (copied into dist/) sets the cross-origin isolation headers; a path that is no file
+// answers 404 (the page never takes itself for a missing plan file).
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "blockscope",
+  "compatibility_date": "2026-10-22",
+  "assets": {
+    "directory": "./dist"
+  }
+}
