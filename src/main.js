@@ -242,17 +242,17 @@ const packUi = {
 };
 let packAbort = null;
 /** Builds the pack for the loaded file (the renderer's default-pack callback and switchPack call it). */
-async function buildPackForFile() {
+async function buildPackForFile(name) {
   packAbort?.abort(); packAbort = new AbortController();
   const t0 = performance.now();
   try {
     const { blob, report } = await buildPack({ schematic: file.schem, source, ui: packUi, signal: packAbort.signal });
-    report.seconds = Math.round((performance.now() - t0) / 100) / 10;
+    report.seconds = Math.round((performance.now() - t0) / 100) / 10; report.name = name;
     packReport = report; renderPackInfo();
     console.log("[blockscope] pack built", report);
     return blob;
   } catch (e) {
-    status(`pack: ${e.message}`, "err"); packReport = { error: e.message }; renderPackInfo();
+    status(`pack: ${e.message}`, "err"); packReport = { error: e.message, name }; renderPackInfo();
     throw e;
   } finally { $("packRow").hidden = true; }
 }
@@ -284,8 +284,9 @@ $("packDetails").addEventListener("toggle", () => { if ($("packDetails").open) {
 async function ensurePack() {
   const name = await packName(file.schem, source);
   if (name === currentPack) return;
-  await switchPack(renderer, name, buildPackForFile);
+  await switchPack(renderer, name, () => buildPackForFile(name));
   currentPack = name; await keepBaseLowest(renderer);
+  readPackReport();
 }
 /** Switches to the visitor's pack (a Packrat analysis) or back to the default (null). */
 async function useSource(next) {
@@ -328,7 +329,7 @@ async function startRenderer() {
   renderer = new SchematicRenderer(
     canvas,
     { [SCHEM_ID]: () => renderBytes() },
-    { [currentPack]: () => buildPackForFile() },
+    { [currentPack]: () => buildPackForFile(currentPack) },
     {
       backgroundColor: BG,
       showGrid: true,
@@ -427,11 +428,20 @@ function faceFronts() {
   const ux = dx * Math.cos(a) - dz * Math.sin(a), uz = dx * Math.sin(a) + dz * Math.cos(a);
   cam.position.set(ctl.target.x + ux * flat, cam.position.y, ctl.target.z + uz * flat); cam.lookAt(ctl.target); ctl.update?.(); redraw();
 }
+// The pivot on the middle of what is drawn (the library fits the file's box, which a converted .litematic may hold
+// off-center), the camera moved along.
+function centerOnDrawn() {
+  const cam = camera(), ctl = controls(); if (!cam || !ctl?.target) return;
+  const box = new THREE.Box3(); for (const m of schematicMeshes()) box.expandByObject(m);
+  if (box.isEmpty()) return;
+  const d = box.getCenter(new THREE.Vector3()).sub(ctl.target);
+  ctl.target.add(d); cam.position.add(d); ctl.update?.(); redraw();
+}
 // the library's fit, then the fronts; again after the library's own deferred refit, unless the user has moved since
 function smartFit() {
   try { renderer?.cameraManager.focusOnSchematics(); } catch {}
-  faceFronts();
-  for (const t of [150, 600]) setTimeout(() => { if (!userMoved) faceFronts(); }, t);
+  centerOnDrawn(); faceFronts();
+  for (const t of [150, 600]) setTimeout(() => { if (!userMoved) { centerOnDrawn(); faceFronts(); } }, t);
 }
 const fitView = () => { stopMomentum(); userMoved = false; savedView.on = false; cancelRestores(); smartFit(); syncUrl(); };
 $("focus").onclick = fitView;
