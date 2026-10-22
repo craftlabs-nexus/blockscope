@@ -1,0 +1,199 @@
+// The resource pack for one schematic, built in the browser: the Minecraft client jar's block assets, the assets of
+// the mods whose namespaces the schematic uses (from the pack source, through Packrat: the plan, then fetchRows with
+// every listed hash checked), the chest models and the schematic's framed drawers (generated.js), merged into one
+// zip the renderer loads. The renderer keeps that zip in its own database under the pack's name; the name is a hash
+// of everything that goes into it (packName), so an unchanged schematic and source never build twice.
+//
+// Which jar has which namespace is not in any pack file. A jar is scanned once (its assets/<ns>/blockstates/ count
+// per namespace) and remembered by its hash; a namespace no remembered jar covers is looked for in the jars whose
+// slug, file name or title matches it (storagedrawers -> StorageDrawers-fabric-26.2.0.1.jar), best match first, so
+// only those are downloaded. A dropped pack's jars are local and cost nothing to scan.
+import JSZip from "jszip";
+import { buildPlan, fetchRows } from "@craftlabs/packrat";
+import { get, put, getFile, putFile, entryKey } from "./store.js";
+import { clientJar, clientRecord, hasClient } from "./mojang.js";
+import { fetchWithProgress } from "./download.js";
+import { addChests, addFramed } from "./generated.js";
+import { sha256Text } from "./sources.js";
+
+/** Bump when what the builder writes changes, so every cached pack is rebuilt. */
+export const GENERATOR = 1;
+export const PACK_PREFIX = "blockscope:";
+const MODRINTH_UA = "craftlabs-nexus/blockscope/0.1 (https://github.com/craftlabs-nexus/blockscope)";
+// what of the client jar goes in: the block assets and the textures block models and the renderer read (entity
+// textures for chests and signs' old layout, colormaps for tints, the font for sign text)
+const VANILLA_KEEP = ["blockstates/", "models/block/", "textures/block/", "textures/entity/", "textures/colormap/", "textures/font/", "textures/misc/", "textures/particle/", "textures/environment/"];
+const MOD_ASSET = /^assets\/([a-z0-9_.-]+)\/(blockstates|models|textures)\/(.+)$/;
+
+/** The namespaces a schematic needs a jar for: its blocks' and its framed drawers' materials'. */
+export function wantedNamespaces(schematic) {
+  const ns = new Set(schematic.namespaces());
+  for (const c of schematic.framedCombos()) for (const t of [c.side, c.trim, c.front]) if (t && t.includes("-")) ns.add(t.split("-")[0]);
+  ns.delete("minecraft"); ns.delete("blockscope");
+  return [...ns].sort();
+}
+
+/** The pack's name for a schematic and a source: the renderer finds a pack it already holds by it. */
+export async function packName(schematic, source) {
+  const d = await source.describe();
+  const key = { g: GENERATOR, src: d.id, mc: d.minecraft, ns: wantedNamespaces(schematic), framed: schematic.framedCombos().map((c) => c.id).sort() };
+  return `${PACK_PREFIX}${(await sha256Text(JSON.stringify(key))).slice(0, 24)}`;
+}
+
+// --- which jar provides which namespace ----------------------------------------------------------------------------
+const norm = (s) => String(s ?? "").toLowerCase().replace(/\.(jar|pw\.toml)$/, "").replace(/[^a-z0-9]/g, "");
+/** How well a row's names match a namespace: 0 not at all; exact slug or mod id > a name starting with it > containing it. */
+function matchScore(row, ns) {
+  const n = norm(ns); if (!n) return 0;
+  const names = [row.scan?.modId, row.entry.key?.split("/").pop(), row.modrinthProject?.title, row.title, row.entry.filename].map(norm).filter(Boolean);
+  let best = 0;
+  for (const s of names) best = Math.max(best, s === n ? 3 : s.startsWith(n) ? 2 : s.includes(n) ? 1 : 0);
+  return best;
+}
+async function scanNamespaces(blob) {
+  const zip = await JSZip.loadAsync(blob);
+  const counts = {};
+  for (const name of Object.keys(zip.files)) { const m = name.match(/^assets\/([a-z0-9_.-]+)\/blockstates\/.+\.json$/); if (m) counts[m[1]] = (counts[m[1]] ?? 0) + 1; }
+  return { counts, zip };
+}
+
+/**
+ * Builds the pack. `ui` reports and asks: ui.progress(text, fraction?), ui.consent({ bytes, what }) resolves once the
+ * visitor agrees to download (rejects if they decline). Returns { blob, report }.
+ */
+export async function buildPack({ schematic, source, ui, signal }) {
+  const desc = await source.describe(signal);
+  const wanted = wantedNamespaces(schematic);
+  const report = { source: desc.name, sourceKind: source.kind, minecraft: desc.minecraft, wanted, mods: [], missing: [], notes: [], downloaded: 0 };
+  let consented = null;
+  const consent = (what) => (consented ??= ui.consent(what));
+
+  // the client jar: asked for first, so the visitor hears the size before anything is fetched
+  const clientCached = await hasClient(desc.minecraft);
+  if (!clientCached) {
+    const rec = await clientRecord(desc.minecraft, signal);
+    await consent({ clientBytes: rec.size, mods: wanted.length, minecraft: desc.minecraft, source: desc.name });
+  }
+
+  // the source's rows, and what each jar is known to provide
+  const zips = new Map();   // row key -> JSZip of a jar fetched in this build
+  let rows = [];
+  if (wanted.length) {
+    ui.progress(`reading the ${desc.name} pack…`);
+    const analysis = await source.analyze(signal);
+    const plan = await buildPlan(analysis, {
+      skipClientOnly: false, contentStatus: null, modrinth: { userAgent: MODRINTH_UA },
+      onProgress: (done, total) => total && ui.progress(`reading the pack's jars: ${done} of ${total}`, done / total),
+    });
+    report.notes.push(...plan.notes);
+    rows = plan.rows.filter((r) => r.entry.origin && r.status.kind !== "unresolvable" && r.entry.side !== "server" && /\.jar$/i.test(r.entry.filename));
+  }
+  const provides = new Map();   // row key -> { ns: blockstate count }
+  for (const r of rows) { const k = entryKey(r.entry); const rec = k && (await get("jars", k)); if (rec?.namespaces) provides.set(r.entry.key, rec.namespaces); }
+  const covered = () => new Set(wanted.filter((ns) => [...provides.values()].some((c) => c[ns])));
+
+  // fetch rows (from this browser's store when it has them), scan and remember what they provide
+  const byUrl = new Map(); for (const r of rows) if (r.entry.origin?.type === "remote") for (const u of [r.entry.origin.url, ...(r.entry.origin.altUrls ?? [])]) byUrl.set(u, r);
+  const progress = new Map();
+  const fetchSome = async (want, label) => {
+    if (!want.length) return;
+    // asked once per build, before the first file this browser does not have
+    for (const r of want) { const k = entryKey(r.entry); if (r.entry.origin?.type === "remote" && !(k && (await getFile(k)))) { await consent({ mods: want.length, source: desc.name, minecraft: desc.minecraft }); break; } }
+    const rowsIn = rows.map((r) => ({ ...r, selected: want.includes(r) }));
+    const total = want.length;
+    const run = fetchRows(rowsIn, {
+      download: async (url, filename, { signal: sig, onProgress }) => {
+        const r = byUrl.get(url), key = r && entryKey(r.entry);
+        const have = key && (await getFile(key));
+        if (have) return new File([have], filename);
+        const buf = await fetchWithProgress(url, { signal: sig, onProgress: (got, size) => { progress.set(filename, [got, size]); onProgress(size ? (got / size) * 100 : 0); showFetch(label); } });
+        report.downloaded += buf.byteLength;
+        return new File([buf], filename);
+      },
+    }, { signal, requireHash: true });
+    let done = 0;
+    for await (const { row, buffer, sha512 } of run) {
+      const blob = new Blob([buffer]);
+      const key = entryKey(row.entry) ?? (sha512 && `sha512:${sha512}`);
+      if (row.entry.origin?.type === "remote" && key && !(await getFile(key))) await putFile(key, blob, row.entry.filename);
+      const { counts, zip } = await scanNamespaces(blob);
+      provides.set(row.entry.key, counts); zips.set(row.entry.key, zip);
+      if (key) await put("jars", key, { filename: row.entry.filename, namespaces: counts });
+      ui.progress(`${label}: ${++done} of ${total}`, done / total);
+    }
+    for (const f of run.summary.failed) report.notes.push(`${f.filename}: ${f.error}`);
+  };
+  const showFetch = (label) => {
+    let got = 0, size = 0; for (const [g, s] of progress.values()) { got += g; size += s; }
+    ui.progress(`${label}: ${(got / 1e6).toFixed(1)}${size ? ` of ${(size / 1e6).toFixed(1)}` : ""} MB`, size ? got / size : undefined);
+  };
+
+  // find the namespaces nobody is known to provide: name matches first (a few rounds, the next best each time),
+  // then, for a dropped pack, every local jar
+  const tried = new Set([...provides.keys()]);
+  for (let round = 0; round < 4; round++) {
+    const missing = wanted.filter((ns) => !covered().has(ns));
+    if (!missing.length) break;
+    const pick = new Set();
+    for (const ns of missing) {
+      const best = rows.filter((r) => !tried.has(r.entry.key)).map((r) => [r, matchScore(r, ns)]).filter(([, s]) => s > 0).sort((a, b) => b[1] - a[1] || a[0].entry.filename.length - b[0].entry.filename.length)[0];
+      if (best) pick.add(best[0]);
+    }
+    if (!pick.size) break;
+    for (const r of pick) tried.add(r.entry.key);
+    await fetchSome([...pick], "finding the mods");
+  }
+  {
+    const missing = wanted.filter((ns) => !covered().has(ns));
+    const locals = rows.filter((r) => r.entry.origin?.type === "local" && !tried.has(r.entry.key));
+    if (missing.length && locals.length) { for (const r of locals) tried.add(r.entry.key); await fetchSome(locals, "looking through your jars"); }
+  }
+
+  // per namespace the jar with the most blockstates in it (an addon may ship a few of its parent's)
+  const chosen = new Set();
+  for (const ns of wanted) {
+    let best = null, n = 0;
+    for (const r of rows) { const c = provides.get(r.entry.key)?.[ns] ?? 0; if (c > n) { n = c; best = r; } }
+    if (best) chosen.add(best); else report.missing.push(ns);
+  }
+  await fetchSome([...chosen].filter((r) => !zips.has(r.entry.key)), "fetching the mods");
+
+  // the client jar
+  ui.progress(`Minecraft ${desc.minecraft} client…`);
+  const client = await clientJar(desc.minecraft, { signal, onProgress: (got, size) => ui.progress(`Minecraft ${desc.minecraft} client from Mojang: ${(got / 1e6).toFixed(1)} of ${(size / 1e6).toFixed(1)} MB`, size ? got / size : undefined) });
+  if (!clientCached) report.downloaded += client.size;
+
+  // merge
+  ui.progress("merging the pack…");
+  const out = new JSZip(), have = new Set();
+  const add = (name, data) => { if (!have.has(name)) { have.add(name); out.file(name, data); } };
+  const clientZip = await JSZip.loadAsync(client);
+  let vanilla = 0;
+  for (const [name, entry] of Object.entries(clientZip.files)) {
+    if (entry.dir || !name.startsWith("assets/minecraft/")) continue;
+    if (!VANILLA_KEEP.some((k) => name.startsWith(`assets/minecraft/${k}`))) continue;
+    add(name, entry.async("uint8array")); vanilla++;
+  }
+  for (const r of rows) {
+    if (!chosen.has(r)) continue;
+    const zip = zips.get(r.entry.key); if (!zip) { report.notes.push(`${r.entry.filename}: not fetched`); continue; }
+    const nss = new Set(); let files = 0;
+    for (const [name, entry] of Object.entries(zip.files)) {
+      const m = !entry.dir && name.match(MOD_ASSET); if (!m) continue;
+      if (m[2] === "textures" && m[3].startsWith("gui/")) continue;
+      // a mod's minecraft-namespace files never replace vanilla's (add keeps the first)
+      add(name, entry.async("uint8array")); files++;
+      if (m[2] === "blockstates" && m[1] !== "minecraft") nss.add(m[1]);
+    }
+    report.mods.push({ title: r.title, filename: r.entry.filename, namespaces: [...nss].sort(), files });
+  }
+  const chests = await addChests(out, clientZip);
+  const framed = await addFramed(out, schematic.framedCombos());
+  const pv = JSON.parse((await clientZip.file("version.json")?.async("string")) ?? "{}").pack_version;
+  out.file("pack.mcmeta", JSON.stringify({ pack: { pack_format: pv?.resource_major ?? pv?.resource ?? 1, description: `Blockscope: Minecraft ${desc.minecraft} + ${report.mods.length} mods of ${desc.name}` } }, null, 2));
+  Object.assign(report, { vanillaFiles: vanilla, chests, framed: framed.made, framedMissing: framed.missing });
+  out.file("blockscope-report.json", JSON.stringify(report, null, 2));
+  const blob = await out.generateAsync({ type: "blob", compression: "STORE" }, (m) => ui.progress(`writing the pack: ${Math.round(m.percent)}%`, m.percent / 100));
+  report.size = blob.size;
+  return { blob, report };
+}
