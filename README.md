@@ -11,8 +11,8 @@ is for), parts and paintings.
 
 ## What it does
 
-- **The pack.** The first time, the page asks before it downloads anything, then fetches the Minecraft client jar
-  from Mojang (the version manifest, the version's JSON, the jar; sha1 checked) and the jars of the mods the
+- **The pack.** Before the first jar is downloaded the page says what it will fetch and how much (the storage hall:
+  87 MB the first time), then fetches the Minecraft client jar from Mojang (the version manifest, the version's JSON, the jar; sha1 checked) and the jars of the mods the
   schematic uses from Modrinth, through [Packrat](https://github.com/craftlabs-nexus/packrat): the Gaming Grudge
   packwiz pack by default (`analyzePackwiz`, `buildPlan`, then `fetchRows` with every listed hash checked). Only the
   mods whose namespaces the schematic uses are fetched: a jar's namespaces are learned once and remembered, and a
