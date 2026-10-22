@@ -37,14 +37,18 @@ export async function tidyRendererPacks(current) {
 /** The renderer's pack manager. */
 export const packManager = (renderer) => renderer?.resourcePackManager ?? renderer?.renderManager?.resourcePackManager ?? null;
 
-/** The merged pack lowest, so a pack the visitor dropped on top wins. */
+/**
+ * The merged pack lowest, so a pack on top (one the visitor dropped, Redstone Tweaks) wins. In the renderer a lower
+ * priority number wins (it loads packs from the highest number to the lowest and the last one loaded overrides), so
+ * the merged pack gets the highest number.
+ */
 export async function keepBaseLowest(renderer) {
   const rpm = packManager(renderer); if (!rpm?.getAllPacks) return;
   const all = rpm.getAllPacks(), base = all.find((p) => p.enabled && p.name.startsWith(PACK_PREFIX));
   const others = all.filter((p) => p !== base);
   if (!base || !others.length) return;
-  const min = Math.min(...others.map((p) => p.priority));
-  if (base.priority >= min) await rpm.setPackPriority(base.id, min - 1);
+  const max = Math.max(...others.map((p) => p.priority));
+  if (base.priority <= max) await rpm.setPackPriority(base.id, max + 1);
 }
 
 /**
@@ -59,8 +63,9 @@ export async function switchPack(renderer, name, build) {
   rpm.beginPackBatchUpdate();
   try {
     if (blob) {
-      const min = Math.min(0, ...rpm.getAllPacks().map((p) => p.priority));
-      await rpm.loadPackFromBlob(blob, name, { priority: min - 1 });
+      // the highest number: the lowest of the packs (see keepBaseLowest)
+      const max = Math.max(0, ...rpm.getAllPacks().map((p) => p.priority));
+      await rpm.loadPackFromBlob(blob, name, { priority: max + 1 });
       target = ours().find((p) => p.name === name);
     } else if (!target.enabled) await rpm.enablePack(target.id);
     const rest = ours().filter((p) => p.name !== name).sort((a, b) => (b.loadedAt ?? 0) - (a.loadedAt ?? 0));
