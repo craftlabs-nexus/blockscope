@@ -68,7 +68,7 @@ without `?schem=`; the hall in development, none in a build unless set).
 The site is static: a Worker with static assets and no script (`wrangler.jsonc`, `assets.directory` `./dist`).
 Cloudflare's Git integration (Workers Builds) builds and deploys it from this repository: branch `master`, build
 command `npm run build`, deploy command `npx wrangler deploy`, preview command the default (`npx wrangler preview`)
-for other branches, build variable `NODE_VERSION` = `22` (Node 20 or later works). `public/_headers` sets the
+for other branches; no build variables (`.node-version` pins Node 24; Node 20 or later works). `public/_headers` sets the
 cross-origin isolation headers, and a path that is no file answers 404. Check a build locally with `npm run build`
 then `npx wrangler dev` (or `npx wrangler deploy --dry-run`). Until plan files are published somewhere the page may
 read (`VITE_PLANS_BASE`, `VITE_DEFAULT_PLAN`), the site opens empty and takes a dropped or opened file.
