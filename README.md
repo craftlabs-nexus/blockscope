@@ -61,7 +61,15 @@ the folder that holds this one. Without it, open or drop a file.
 | `?pick=off` | no block picking (the renderer's) |
 
 Build settings: `VITE_PLANS_BASE`, `VITE_ALLOWED_ORIGINS` (comma separated), `VITE_DEFAULT_PLAN` (the file opened
-without `?schem=`; empty for none).
+without `?schem=`; the hall in development, none in a build unless set).
+
+## Deploying (Cloudflare Pages)
+
+The site is static. Cloudflare Pages builds it from this repository through its GitHub integration: production
+branch `master`, build command `npm run build`, output directory `dist`, environment variable `NODE_VERSION` = `22`
+(Node 20 or later works). `public/_headers` sets the cross-origin isolation headers. Every push to `master`
+deploys, and every other branch gets a preview address. Until plan files are published somewhere the page may
+read (`VITE_PLANS_BASE`, `VITE_DEFAULT_PLAN`), the site opens empty and takes a dropped or opened file.
 
 ## Files
 
