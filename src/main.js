@@ -842,6 +842,11 @@ const help = $("help");
 const setHelp = (on) => help.classList.toggle("on", on);
 $("helpBtn").onclick = () => setHelp(!help.classList.contains("on"));
 $("helpClose").onclick = () => setHelp(false);
+// About sheet: the licence, the sources and where the game's assets come from, from the footer.
+const about = $("about");
+const setAbout = (on) => { about.classList.toggle("on", on); $("aboutBtn").setAttribute("aria-expanded", String(on)); };
+$("aboutBtn").onclick = () => setAbout(!about.classList.contains("on"));
+$("aboutClose").onclick = () => setAbout(false);
 // Shot and Build hand the visitor a download.
 function download(blob, name) {
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
@@ -1007,6 +1012,8 @@ $("copyLink").onclick = async () => {
 addEventListener("keydown", (ev) => {
   if (typing(ev) || ev.ctrlKey || ev.metaKey || ev.altKey) return;
   const k = ev.key, c = ev.code;
+  // Esc closes the About sheet even while the first-visit consent sheet is up (it can be read before agreeing)
+  if (k === "Escape" && about.classList.contains("on")) { setAbout(false); ev.preventDefault(); return; }
   if (!$("consent").hidden) return;
   // every shortcut below stops the camera's leftover spin (Esc and help too: a key press means "hold still")
   if (!/^[wasdeqWASDEQ ]$/.test(k) && k !== "Shift") stopMomentum();
@@ -1020,7 +1027,7 @@ addEventListener("keydown", (ev) => {
   else if (k === "1") setMode("all"); else if (k === "2") setMode("single"); else if (k === "3") setMode("below"); else if (k === "4") setMode("above");
   else if (k === "h" || k === "H") setCollapsed(!hud.classList.contains("collapsed"));
   else if (k === "?" || (c === "Slash" && ev.shiftKey)) setHelp(!help.classList.contains("on"));
-  else if (k === "Escape") { if (help.classList.contains("on")) setHelp(false); else showBlock(null); }
+  else if (k === "Escape") { if (about.classList.contains("on")) setAbout(false); else if (help.classList.contains("on")) setHelp(false); else showBlock(null); }
   else return;
   ev.preventDefault();
 });

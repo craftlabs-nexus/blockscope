@@ -166,13 +166,20 @@
     #tip .pt { color: var(--fg-key); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #tip .pos { color: var(--fg-dim); font-family: var(--mono); font-size: 11px; }
 
-    /* Help: a sheet over the view with the mouse and keyboard reference, toggled with ? */
-    #help { position: fixed; z-index: 6; right: 12px; top: 12px; width: 320px; max-width: calc(100vw - 24px); max-height: calc(100vh - 24px); overflow: auto; display: none;
+    /* Help and About: sheets over the view (the mouse and keyboard reference, toggled with ?; the licence, the sources
+       and where the game's assets come from, from the footer's About) */
+    /* above the renderer's own overlays (its no-pack notice at 30, its loading card at 10000): a sheet opened on purpose wins */
+    #help, #about { position: fixed; z-index: 10001; right: 12px; top: 12px; width: 320px; max-width: calc(100vw - 24px); max-height: calc(100vh - 24px); overflow: auto; display: none;
             padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 9px; box-shadow: 0 8px 28px rgba(0, 0, 0, .45); backdrop-filter: blur(8px); }
-    #help.on { display: block; }
-    #help h3 { margin: 0 0 6px; font-size: 10px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--fg-dim); }
-    #help h3:not(:first-child) { margin-top: 10px; }
-    #help .x { position: absolute; right: 8px; top: 8px; width: 22px; height: 22px; padding: 0; border-color: transparent; background: transparent; color: var(--fg-dim); }
+    #about { top: auto; bottom: 30px; font-size: 11.5px; line-height: 1.45; color: var(--fg-key); }
+    #about p { margin: 0 0 6px; }
+    #about p:last-child { margin-bottom: 0; }
+    #about a { color: var(--fg); }
+    #about a:hover { color: var(--accent); }
+    #help.on, #about.on { display: block; }
+    #help h3, #about h3 { margin: 0 0 6px; font-size: 10px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--fg-dim); }
+    #help h3:not(:first-child), #about h3:not(:first-child) { margin-top: 10px; }
+    #help .x, #about .x { position: absolute; right: 8px; top: 8px; width: 22px; height: 22px; padding: 0; border-color: transparent; background: transparent; color: var(--fg-dim); }
     .keys { display: grid; grid-template-columns: auto 1fr; column-gap: 10px; row-gap: 4px; margin: 0; font-size: 11.5px; color: var(--fg-key); align-items: center; }
     .keys dt { white-space: nowrap; text-align: right; }
     .keys dd { margin: 0; }
@@ -196,11 +203,11 @@
     #dropHint { position: fixed; inset: 0; z-index: 7; display: grid; place-items: center; background: rgba(26, 29, 34, .7); pointer-events: none; }
     #dropHint[hidden] { display: none; }
     #dropHint div { padding: 18px 26px; border: 2px dashed var(--accent-line); border-radius: 12px; color: var(--fg); font-size: 14px; background: var(--panel); }
-    /* Footer: the sources, where the assets come from, Mojang's line */
-    #footer { position: fixed; right: 10px; bottom: 8px; z-index: 4; max-width: min(400px, calc(100vw - 20px)); display: flex; flex-direction: column; align-items: flex-end; gap: 1px;
-              font-size: 10.5px; line-height: 1.35; color: var(--fg-dim); text-align: right; }
-    #footer a { color: var(--fg-key); }
-    #footer a:hover { color: var(--accent); }
+    /* Footer: one quiet line, About (the sheet with the licence, the sources and Mojang's line) and Source */
+    #footer { position: fixed; right: 10px; bottom: 8px; z-index: 4; display: flex; gap: 6px; align-items: center; font-size: 11px; color: var(--fg-dim); }
+    #footer a, #footer button { color: var(--fg-dim); font: inherit; text-decoration: none; }
+    #footer button { padding: 0; border: 0; background: transparent; cursor: pointer; }
+    #footer a:hover, #footer button:hover { color: var(--accent); }
 
     @media (max-width: 480px) { :root { --hud-w: calc(100vw - 20px); } }
   </style>
@@ -338,13 +345,21 @@
   </div>
   <div id="dropHint" hidden><div>Drop a schematic, a resource pack, or your modpack</div></div>
   <footer id="footer">
-    <span>Blockscope, <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener">AGPL-3.0</a>: source of
+    <button id="aboutBtn" type="button" aria-haspopup="dialog" aria-controls="about" title="The licence, the source and where the game's assets come from">About</button>
+    <span aria-hidden="true">·</span>
+    <a href="https://github.com/craftlabs-nexus/blockscope" target="_blank" rel="noopener" title="Blockscope's source on GitHub (AGPL-3.0)">Source</a>
+  </footer>
+  <div id="about" role="dialog" aria-label="about Blockscope">
+    <button class="x" id="aboutClose" title="Close (Esc)">&#10005;</button>
+    <h3>Blockscope</h3>
+    <p>Free software under the <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener">AGPL-3.0</a>. Source:
       <a href="https://github.com/craftlabs-nexus/blockscope" target="_blank" rel="noopener">the app</a>,
       <a href="https://github.com/craftlabs-nexus/schematic-renderer" target="_blank" rel="noopener">the renderer</a> and
-      <a href="https://github.com/craftlabs-nexus/packrat" target="_blank" rel="noopener">the pack reader</a>.</span>
-    <span>Game assets are downloaded by your browser from Mojang (the Minecraft client) and Modrinth (the mods), never served from here.</span>
-    <span>Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft.</span>
-  </footer>
+      <a href="https://github.com/craftlabs-nexus/packrat" target="_blank" rel="noopener">the pack reader</a>.</p>
+    <h3>Game assets</h3>
+    <p>Your browser downloads them from Mojang (the Minecraft client) and Modrinth (the mods); they are never served from here.</p>
+    <p>Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft.</p>
+  </div>
   <div id="tip" role="tooltip"><div class="id"></div><div class="st"></div><div class="pt"></div><div class="pos"></div></div>
   <div id="help" role="dialog" aria-label="mouse and keyboard reference">
     <button class="x" id="helpClose" title="Close (Esc)">&#10005;</button>
