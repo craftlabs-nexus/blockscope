@@ -11,7 +11,8 @@ import { framedRealId } from "./framed.js";
 import { buildPaintings } from "./paintings.js";
 import { collectPoints, frameView, applyView, viewState, restoreView as restoreCamera, sizeFor, encodeGif } from "./buildgif.js";
 import { buildPack, packName, PACK_PREFIX } from "./pack/build.js";
-import { ggSource, droppedSource } from "./pack/sources.js";
+import { defaultSource, droppedSource } from "./pack/sources.js";
+import { REDSTONE_TWEAKS, extraPackBlob } from "./pack/extras.js";
 import { tidyRendererPacks, switchPack, keepBaseLowest, packManager } from "./pack/packs.js";
 import { clear as clearStore, usage } from "./pack/store.js";
 import { resolvePlan, loadPlan, DEFAULT_PLAN, SCHEMATIC_EXT } from "./plans.js";
@@ -68,6 +69,11 @@ function setFile(f, { fromUrl = false } = {}) {
   file = f; meta = f.meta; schemName = f.name;
   $("schemName").textContent = schemName; $("schemName").title = f.url ? f.url.href : `${schemName} (opened from disk; stays in this page)`;
   document.title = `${schemName} · Blockscope`;
+  // a link can bring back only a file that was opened from a link (?schem=), not one from disk; dimmed (not disabled,
+  // so its tooltip still shows and a click says why)
+  $("copyLink").setAttribute("aria-disabled", String(!f.param));
+  $("copyLink").title = f.param ? "Copy a link to this view: file, camera, layers and hidden parts"
+    : "A file opened from disk cannot be linked: a link could not bring it back";
   const s = f.schem, { counts, parts, roofCover } = s.shellOf(meta);
   shellCells = parts; hiddenCache = { key: null, set: null }; partCells.clear(); frontCache = { name: null, dir: null };
   Object.assign(info, s.info(), { shell: counts, roofCover, meta: meta !== null, parts: meta ? partsOf(meta) : [] });
@@ -219,9 +225,9 @@ function showGhost(name) {
 function hideGhost() { if (ghost) { markGroup.remove(ghost); ghost.geometry.dispose(); ghost = null; redraw(); } }
 
 // ---- the resource pack ----------------------------------------------------------------------------------------------
-// The pack is built for the loaded file from a source (the Gaming Grudge pack, or the visitor's own), named after
+// The pack is built for the loaded file from a source (the default mods, or the visitor's own), named after
 // everything that goes into it; the renderer keeps it and skips the build when it already holds that name.
-let source = ggSource(), currentPack = null, packReport = null;
+let source = defaultSource(), currentPack = null, packReport = null;
 const PACK_CONSENT = "blockscope.consent";
 let consentWaiter = null;
 function askConsent(what) {
@@ -275,7 +281,7 @@ function renderPackInfo() {
   if (!r) { el.textContent = "not built yet"; return; }
   if (r.error) { el.innerHTML = `<p class="err">${esc(r.error)}</p>`; return; }
   const mods = r.mods.map((m) => `<li><code>${esc(m.filename)}</code> → ${esc(m.namespaces.join(", ") || "(no blocks)")}</li>`).join("");
-  el.innerHTML = `<p>Minecraft ${esc(r.minecraft)} from Mojang + ${r.mods.length} mod${r.mods.length === 1 ? "" : "s"} of ${esc(r.source)}${r.size ? `, ${(r.size / 1e6).toFixed(1)} MB` : ""}${r.cached ? " (built on an earlier visit)" : r.seconds ? `, built in ${r.seconds} s, ${(r.downloaded / 1e6).toFixed(1)} MB downloaded` : ""}</p><ul>${mods}</ul>` +
+  el.innerHTML = `<p>Minecraft ${esc(r.minecraft)} from Mojang + ${r.mods.length} mod${r.mods.length === 1 ? "" : "s"} (${esc(r.source)})${r.size ? `, ${(r.size / 1e6).toFixed(1)} MB` : ""}${r.cached ? " (built on an earlier visit)" : r.seconds ? `, built in ${r.seconds} s, ${(r.downloaded / 1e6).toFixed(1)} MB downloaded` : ""}</p><ul>${mods}</ul>` +
     (r.missing?.length ? `<p class="warn">No jar of the pack provides: ${r.missing.map((n) => `<code>${esc(n)}</code>`).join(", ")}</p>` : "") +
     (r.framed ? `<p>${r.framed} framed drawer material set${r.framed === 1 ? "" : "s"} composited${r.framedMissing?.length ? `; not found: ${r.framedMissing.map(esc).join(", ")}` : ""}</p>` : "") +
     (r.notes?.length ? `<p class="dim">${r.notes.map(esc).join("<br>")}</p>` : "");
@@ -292,7 +298,7 @@ async function ensurePack() {
 }
 /** Switches to the visitor's pack (a Packrat analysis) or back to the default (null). */
 async function useSource(next) {
-  source = next ?? ggSource(); packReport = null; currentPack = null; renderPackInfo();
+  source = next ?? defaultSource(); packReport = null; currentPack = null; renderPackInfo();
   if (!renderer || !file) return;
   try { await ensurePack(); status(`pack: ${source.label}`); } catch (e) { status(`pack: ${e.message}`, "err"); }
 }
@@ -359,6 +365,7 @@ async function startRenderer() {
           if (layer.mode === "above" && layer.wantBottomUp) { layer.wantBottomUp = false; lookFromBelow(); }
           syncUrl();
           readPackReport();
+          showRedstoneTweaks();
         },
       },
     },
@@ -795,6 +802,27 @@ canvas.addEventListener("click", (ev) => {
   const sm = renderer.simulationManager;
   if (sm?.isSimulationActive()) sm.interactWithBlock(p.x, p.y, p.z).then((w) => { if (w) { so.schematicWrapper = w; so.rebuildMesh?.(); } }).catch(() => {});
 }, true);
+// Signal digits: the Redstone Tweaks resource pack (MIT, from Modrinth) on top of the built pack, drawing the signal
+// strength on dust, the delay on repeaters and the mode on comparators. It is on while the renderer holds that pack
+// (the renderer keeps packs between visits, so the choice is remembered); the zip is fetched once and kept.
+// a pack added on top: the lowest priority number, which wins in the renderer (one rebuild, no reordering after)
+const topPriority = (rpm) => Math.min(0, ...rpm.getAllPacks().map((p) => p.priority)) - 1;
+const redstoneTweaksPack = () => packManager(renderer)?.getAllPacks?.().find((p) => p.name === REDSTONE_TWEAKS.name) ?? null;
+function showRedstoneTweaks() { $("rtToggle").setAttribute("aria-pressed", String(!!redstoneTweaksPack()?.enabled)); }
+$("rtToggle").onclick = async () => {
+  const rpm = packManager(renderer); if (!rpm) { status("open a schematic first", "err"); return; }
+  const have = redstoneTweaksPack();
+  try {
+    if (have) { status("signal digits off…", "busy"); await rpm.removePack(have.id); status("signal digits off"); }
+    else {
+      status("fetching Redstone Tweaks from Modrinth…", "busy");
+      await rpm.loadPackFromBlob(await extraPackBlob(REDSTONE_TWEAKS), REDSTONE_TWEAKS.name, { priority: topPriority(rpm) });
+      await keepBaseLowest(renderer);
+      status("signal digits on (Redstone Tweaks): signal strength on dust, repeater delays, comparator modes");
+    }
+  } catch (e) { status(`signal digits: ${e.message}`, "err"); }
+  showRedstoneTweaks();
+};
 // Redstone simulation: the renderer bundles Nucleation's simulator (MCHPRS redpiler). Simulate compiles the loaded
 // schematic; clicking a lever then toggles it in the simulation, Tick advances one tick, Run ticks at 20/s. The dust
 // is the renderer's own, tinted by its power, rebuilt after every sync.
@@ -854,7 +882,14 @@ function download(blob, name) {
 }
 const stem = () => schemName.replace(/\.[^.]+$/, "");
 /** A render of the view as a PNG Blob (also the console's and the test harness's way in). */
-const screenshot = (width = 1600, height = 1000) => renderer.takeScreenshot({ format: "image/png", width, height });
+const screenshot = (width = 1600, height = 1000) => shoot({ format: "image/png", width, height });
+// The renderer's takeScreenshot up to 1.7.1 restores the canvas at its backing-store size, which on a display scaled
+// above 100% grows the canvas with every shot (the live view zooms into a corner through Build). Fixed in the fork
+// (unreleased); until then the canvas is put back to its container's size after each shot.
+async function shoot(options) {
+  try { return await renderer.takeScreenshot(options); }
+  finally { renderer.renderManager?.updateCanvasSize?.(); }
+}
 window.saveScreenshot = async (name = `${stem()}.png`, width = 1600, height = 1000) => { download(await screenshot(width, height), name); status(`saved ${name}`); };
 $("shot").onclick = () => saveScreenshot();
 // The build animation (Build): an animated GIF of the schematic going up a layer at a time from the bottom, each frame
@@ -906,7 +941,7 @@ async function captureBuild() {
       await loadBelow(y);
       const n = drawnVertices(); if (n === drawn) continue; drawn = n;
       applyView(cam, ctl, view); redraw();
-      pngs.push(await renderer.takeScreenshot({ format: "image/png", width, height }));
+      pngs.push(await shoot({ format: "image/png", width, height }));
       delays.push(opt.delay);
     }
     delays[delays.length - 1] = opt.hold;
@@ -931,10 +966,25 @@ $("buildGif").onclick = () => captureBuild();
 
 // ---- opening files --------------------------------------------------------------------------------------------------
 // A schematic opened or dropped stays in the page (nothing is uploaded); the link then names no file, since a reload
-// cannot bring it back. A resource-pack zip goes on top of the merged pack; a modpack (a folder, an .mrpack, a
-// CurseForge or mods zip) becomes the source of the mod jars.
-const openLocal = (f) => f.arrayBuffer().then((buf) => openFile({ name: f.name, url: null, param: null, bytes: new Uint8Array(buf), meta: null, paintings: [], paintingsBase: null }));
-$("file").onchange = (ev) => { const f = ev.target.files?.[0]; if (f) openLocal(f); ev.target.value = ""; };
+// cannot bring it back. Its generator's metadata (<name>.meta.json: parts, shell, owner, role, item) comes along when
+// it is opened or dropped together with it. A resource-pack zip goes on top of the merged pack; a modpack (a folder,
+// an .mrpack, a CurseForge or mods zip) becomes the source of the mod jars.
+async function openLocal(f, metaFile = null) {
+  let meta = null;
+  if (metaFile) { try { meta = JSON.parse(await metaFile.text()); } catch (e) { status(`${metaFile.name}: ${e.message}`, "err"); } }
+  await openFile({ name: f.name, url: null, param: null, bytes: new Uint8Array(await f.arrayBuffer()), meta, paintings: [], paintingsBase: null });
+}
+// the metadata file among `files` that goes with the schematic `schem`: <stem>.meta.json, else the only .meta.json
+function metaFor(schem, files) {
+  const metas = files.filter((x) => /\.meta\.json$/i.test(x.name));
+  const stem = schem.name.replace(/\.[^.]+$/, "").toLowerCase();
+  return metas.find((x) => x.name.toLowerCase() === `${stem}.meta.json`) ?? (metas.length === 1 ? metas[0] : null);
+}
+$("file").onchange = (ev) => {
+  const files = [...(ev.target.files ?? [])], schem = files.find((x) => SCHEMATIC_EXT.test(x.name));
+  if (schem) openLocal(schem, metaFor(schem, files)); else if (files.length) status("pick a schematic (and its .meta.json if you have it)", "err");
+  ev.target.value = "";
+};
 async function isResourcePack(f) {
   try {
     const zip = await JSZip.loadAsync(f);
@@ -944,7 +994,7 @@ async function isResourcePack(f) {
 async function addResourcePack(f) {
   const rpm = packManager(renderer); if (!rpm) { status("open a schematic first, then drop the resource pack", "err"); return; }
   status(`adding ${f.name}…`, "busy");
-  try { await rpm.loadPackFromBlob(f, f.name); await keepBaseLowest(renderer); status(`${f.name} on top of the pack (the renderer's sidebar, Ctrl+\\, lists and removes packs)`); }
+  try { await rpm.loadPackFromBlob(f, f.name, { priority: topPriority(rpm) }); await keepBaseLowest(renderer); status(`${f.name} on top of the pack (the renderer's sidebar, Ctrl+\\, lists and removes packs)`); }
   catch (e) { status(`${f.name}: ${e.message}`, "err"); }
 }
 // a dropped folder's files with their paths (what Packrat's folder reader takes)
@@ -976,7 +1026,7 @@ addEventListener("drop", async (ev) => {
     else status(`${f.name}: neither a resource pack nor a modpack`, "err");
   }
   if (jars.length) await usePackFiles(jars.map((f) => ({ relativePath: `mods/${f.name}`, file: f })), `${jars.length} dropped jar${jars.length === 1 ? "" : "s"}`);
-  if (schem) await openLocal(schem);
+  if (schem) await openLocal(schem, metaFor(schem, files));
 });
 
 // The link: the address bar follows the view (file, shell, hidden parts, layer mode and the camera once it has been
@@ -1003,8 +1053,9 @@ function syncUrl(now = false) {
   if (now) write(); else urlTimer = setTimeout(write, 400);
 }
 $("copyLink").onclick = async () => {
+  if (!file?.param) { status("a file opened from disk cannot be linked: a link could not bring it back"); return; }
   syncUrl(true);
-  try { await navigator.clipboard.writeText(location.href); status(file?.param ? "link copied" : "link copied; it cannot bring back a file opened from disk"); }
+  try { await navigator.clipboard.writeText(location.href); status("link copied"); }
   catch { status("could not copy; the address bar has the link", "err"); }
 };
 // Keyboard shortcuts (the tooltips name them): F fit, N north, P / I camera, R roof, 1-4 layer modes, PgUp / PgDn and

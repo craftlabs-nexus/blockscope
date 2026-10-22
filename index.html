@@ -84,7 +84,7 @@
     button:active { transform: translateY(1px); }
     button:focus-visible, .btn:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
     button[aria-pressed="true"] { color: #fff; background: var(--accent-bg); border-color: var(--accent-line); }
-    button:disabled { opacity: .4; cursor: default; }
+    button:disabled, button[aria-disabled="true"] { opacity: .4; cursor: default; }
     .icon { width: 25px; padding: 0; font-size: 11px; }
     /* Segmented group: one strip of equal cells, the active cell filled */
     .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
@@ -300,17 +300,20 @@
             <button id="simRun" aria-pressed="false" title="Tick continuously at 20 per second">Run</button>
           </div>
           <p class="hint" id="simInfo">—</p>
+          <div class="bar">
+            <button id="rtToggle" class="toggle" aria-pressed="false" title="Signal strength on dust, delays on repeaters and modes on comparators: the Redstone Tweaks resource pack (MIT, 1 MB from Modrinth, fetched once)">Signal digits</button>
+          </div>
         </div>
       </details>
       <details class="grp" id="fileGrp">
         <summary><h2>File <span class="sum" id="fileSum"></span></h2></summary>
         <div class="in">
           <div class="bar">
-            <label class="btn" for="file" title="Open a .schem, .schematic, .litematic or structure .nbt; it stays in this page, nothing is uploaded">Open…</label>
-            <input id="file" class="sr" type="file" accept=".schem,.schematic,.litematic,.nbt" />
-            <button id="copyLink" title="Copy a link to this view: file, camera, layers and hidden parts">Copy link</button>
+            <label class="btn" for="file" title="Open a .schem, .schematic, .litematic or structure .nbt, with its .meta.json for the parts if you have it; it stays in this page, nothing is uploaded">Open…</label>
+            <input id="file" class="sr" type="file" multiple accept=".schem,.schematic,.litematic,.nbt,.json" />
+            <button id="copyLink" aria-disabled="true" title="Copy a link to this view: file, camera, layers and hidden parts (once a file is opened from a link)">Copy link</button>
           </div>
-          <p class="hint">or drop a schematic, a resource pack .zip, or your modpack (folder, .mrpack, CurseForge zip) on the page</p>
+          <p class="hint">or drop a schematic (with its .meta.json for the parts), a resource pack .zip, or your modpack (folder, .mrpack, CurseForge zip) on the page</p>
           <details class="sub" id="packDetails"><summary>Resource pack <span class="sum" id="packSum"></span></summary>
             <div class="subbody">
               <div id="packInfo">not built yet</div>
@@ -319,7 +322,7 @@
                 <input id="packFolder" class="sr" type="file" webkitdirectory multiple />
                 <label class="btn" for="packFile" title="A Modrinth .mrpack or a CurseForge zip">Your pack file…</label>
                 <input id="packFile" class="sr" type="file" accept=".mrpack,.zip" />
-                <button id="packDefault" title="Back to the Gaming Grudge pack">Gaming Grudge</button>
+                <button id="packDefault" title="Back to the default mods">Default mods</button>
               </div>
               <div class="bar packbar">
                 <button id="packForget" title="Delete the downloaded jars and built packs this browser keeps for Blockscope">Forget downloads</button>
@@ -338,7 +341,7 @@
     <p class="dim">Blockscope draws blocks with the game's own textures. Your browser downloads the Minecraft client jar from Mojang and the mods' jars from Modrinth, checks their hashes and keeps them in this browser for the next visit. Nothing is uploaded.</p>
     <div class="bar">
       <button id="consentYes" aria-pressed="true">Download</button>
-      <label class="btn" for="packFolder2" title="Your launcher instance or mods folder instead of the Gaming Grudge pack">Use my mods folder…</label>
+      <label class="btn" for="packFolder2" title="Your launcher instance or mods folder instead of the default mods">Use my mods folder…</label>
       <input id="packFolder2" class="sr" type="file" webkitdirectory multiple />
       <button id="consentNo">Not now</button>
     </div>

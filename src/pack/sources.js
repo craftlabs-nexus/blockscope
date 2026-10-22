@@ -1,18 +1,21 @@
-// Where the mod jars come from: the Gaming Grudge pack (packwiz, on gg.craftlabs.nexus, the files on Modrinth) by
+// Where the mod jars come from: the default mods (a packwiz pack on gg.craftlabs.nexus, the files on Modrinth) by
 // default, or a pack the visitor drops (a launcher folder, an .mrpack, a CurseForge zip), read by Packrat. A source
 // says which Minecraft version it is for, gives an id that changes when its files do (part of the merged pack's
 // name), and analyzes itself into Packrat's entries when a pack has to be built.
 import { analyzePackwiz } from "@craftlabs/packrat";
 import { get, put } from "./store.js";
 
-export const GG_PACK = "https://gg.craftlabs.nexus/pack/pack.toml";
+export const DEFAULT_PACK = "https://gg.craftlabs.nexus/pack/pack.toml";
 export const DEFAULT_MINECRAFT = "26.2";
 
 const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 export const sha256Text = async (s) => hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)));
 
-/** A packwiz pack by its pack.toml URL. Its id is the index's hash, read from pack.toml (one small request). */
-export function packwizSource(url, label) {
+/**
+ * A packwiz pack by its pack.toml URL. Its id is the index's hash, read from pack.toml (one small request). Its name is
+ * the pack's own unless `fixedName` gives the one to show.
+ */
+export function packwizSource(url, label, { fixedName = null } = {}) {
   let head = null;
   const readHead = async (signal) => {
     if (head) return head;
@@ -21,7 +24,7 @@ export function packwizSource(url, label) {
     const text = await r.text();
     const indexHash = text.match(/\[index\][^[]*?\bhash\s*=\s*"([0-9a-fA-F]+)"/)?.[1] ?? (await sha256Text(text));
     const minecraft = text.match(/\[versions\][^[]*?\bminecraft\s*=\s*"([^"]+)"/)?.[1] ?? DEFAULT_MINECRAFT;
-    const name = text.match(/^name\s*=\s*"([^"]+)"/m)?.[1] ?? label;
+    const name = fixedName ?? text.match(/^name\s*=\s*"([^"]+)"/m)?.[1] ?? label;
     return (head = { indexHash: indexHash.toLowerCase(), minecraft, name });
   };
   return {
@@ -44,7 +47,7 @@ export function packwizSource(url, label) {
     },
   };
 }
-export const ggSource = () => packwizSource(GG_PACK, "Gaming Grudge");
+export const defaultSource = () => packwizSource(DEFAULT_PACK, "Default mods", { fixedName: "Default mods" });
 
 /** A pack the visitor dropped, already analyzed by Packrat. Its id is the hash of its entries. */
 export function droppedSource(analysis, label) {

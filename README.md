@@ -5,7 +5,7 @@ structure `.nbt`), builds a resource pack for it in your browser from Mojang's a
 draws it with [`@craftlabs/schematic-renderer`](https://github.com/craftlabs-nexus/schematic-renderer), so modded
 blocks show with their own textures. Nothing is uploaded and no server does any work: the host serves files.
 
-It grew out of the storage plan viewer of the Gaming Grudge server (CraftLabs), and draws that plan's files by
+It grew out of the CraftLabs storage plan's viewer, and draws that plan's files by
 default: the storage hall, the engine room and their test fixtures, with the generator's metadata (what each block
 is for), parts and paintings.
 
@@ -13,8 +13,8 @@ is for), parts and paintings.
 
 - **The pack.** Before the first jar is downloaded the page says what it will fetch and how much (the storage hall:
   87 MB the first time), then fetches the Minecraft client jar from Mojang (the version manifest, the version's JSON, the jar; sha1 checked) and the jars of the mods the
-  schematic uses from Modrinth, through [Packrat](https://github.com/craftlabs-nexus/packrat): the Gaming Grudge
-  packwiz pack by default (`analyzePackwiz`, `buildPlan`, then `fetchRows` with every listed hash checked). Only the
+  schematic uses from Modrinth, through [Packrat](https://github.com/craftlabs-nexus/packrat): a default packwiz
+  pack of mods (`analyzePackwiz`, `buildPlan`, then `fetchRows` with every listed hash checked). Only the
   mods whose namespaces the schematic uses are fetched: a jar's namespaces are learned once and remembered, and a
   namespace no remembered jar has is looked for in the jars whose slug, file name or title matches it. The merged
   pack (the client's block assets, the mods' assets as they are, chest models and the framed drawers' composites
@@ -25,13 +25,19 @@ is for), parts and paintings.
 - **The file.** Layer slicing, the roof, walls and floor toggles, hiding parts, the sign text and the per-layer counts
   of the build animation are all worked out in the page from the file in memory (`src/schematic.js`), which also
   renames framed drawers per material set so their composite models apply. A `.litematic`, `.schematic` or `.nbt` is
-  converted to a Sponge schematic by the renderer's WASM (Nucleation) first.
+  converted to a Sponge schematic by the renderer's WASM (Nucleation) first. A file opened or dropped from disk
+  brings its generator's metadata when its `<name>.meta.json` is opened or dropped with it (the parts, the shell,
+  what each block is for); a plan file opened by its address finds it beside itself.
 - **The view.** View (fit to the fronts, perspective or isometric, Shot, Build, the shell toggles), Layers (all,
   single, below, above, a slider), Parts (from the plan's metadata: hover to light one up, hide, solo, fly to it),
-  Block (click to pin: id, state, position, a sign's text, a painting, the metadata), Redstone (`?sim=on`: the
-  renderer's simulator), File (open, copy link, the pack). Hover shows a tooltip. The link follows the view: the file,
-  the shell, the hidden parts, the layer and the camera. Build downloads an animated GIF of the build going up a
-  layer at a time. `?` lists the mouse and keyboard controls.
+  Block (click to pin: id, state, position, a sign's text, a painting, the metadata), Redstone (signal digits:
+  [Redstone Tweaks](https://modrinth.com/resourcepack/redstonetweaksresourcepack), MIT, fetched from Modrinth once and
+  added on top of the pack, showing dust strength, repeater delays and comparator modes; `?sim=on`: the renderer's
+  simulator), File (open, copy link, the pack). Hover shows a tooltip. The link follows the view: the file, the
+  shell, the hidden parts, the layer and the camera; it can name only a file opened by its address, so Copy link is
+  dimmed for a file from disk. Build downloads an animated GIF of the build going up a layer at a time. A resource
+  pack dropped on the page, like Redstone Tweaks, goes above the built pack and wins over it. `?` lists the mouse and
+  keyboard controls.
 
 ## Running it
 
