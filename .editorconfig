@@ -1,0 +1,21 @@
+# Editor settings (https://editorconfig.org): two spaces and LF, as the storage plan's viewer this app grows from.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+max_line_length = 120
+
+# a trailing double space is a Markdown line break
+[*.md]
+trim_trailing_whitespace = false
+
+# written by npm: leave it as written
+[package-lock.json]
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+max_line_length = unset

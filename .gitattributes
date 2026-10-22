@@ -1,0 +1,15 @@
+# LF in the repository and in every working tree, whatever core.autocrlf says (Git for Windows defaults it on).
+* text=auto eol=lf
+
+# binary: never converted or diffed as text
+*.png  binary
+*.jpg  binary
+*.gif  binary
+*.webp binary
+*.zip  binary
+*.jar  binary
+*.wasm binary
+*.schem binary
+*.schematic binary
+*.litematic binary
+*.nbt  binary
