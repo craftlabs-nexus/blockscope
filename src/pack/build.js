@@ -9,7 +9,7 @@
 // slug, file name or title matches it (storagedrawers -> StorageDrawers-fabric-26.2.0.1.jar), best match first, so
 // only those are downloaded. A dropped pack's jars are local and cost nothing to scan.
 import JSZip from "jszip";
-import { buildPlan, fetchRows } from "@craftlabs/packrat";
+import { buildPlan, fetchRows, getVersionsFromHashes } from "@craftlabs/packrat";
 import { get, put, getFile, putFile, entryKey } from "./store.js";
 import { clientJar, clientRecord, hasClient } from "./mojang.js";
 import { fetchWithProgress } from "./download.js";
@@ -58,8 +58,10 @@ async function scanNamespaces(blob) {
 }
 
 /**
- * Builds the pack. `ui` reports and asks: ui.progress(text, fraction?), ui.consent({ bytes, what }) resolves once the
- * visitor agrees to download (rejects if they decline). Returns { blob, report }.
+ * Builds the pack. `ui` reports and asks: ui.progress(text, fraction?); ui.consent({ clientBytes, mods, modBytes,
+ * minecraft, source }) resolves once the visitor agrees to download (rejects if they decline). It is asked before the
+ * first jar is downloaded, after the lookups that size the download: Mojang's version record and, for the mods,
+ * the pack's files and Modrinth's record of them. Returns { blob, report }.
  */
 export async function buildPack({ schematic, source, ui, signal }) {
   const desc = await source.describe(signal);
@@ -68,12 +70,8 @@ export async function buildPack({ schematic, source, ui, signal }) {
   let consented = null;
   const consent = (what) => (consented ??= ui.consent(what));
 
-  // the client jar: asked for first, so the visitor hears the size before anything is fetched
   const clientCached = await hasClient(desc.minecraft);
-  if (!clientCached) {
-    const rec = await clientRecord(desc.minecraft, signal);
-    await consent({ clientBytes: rec.size, mods: wanted.length, minecraft: desc.minecraft, source: desc.name });
-  }
+  const clientBytes = clientCached ? 0 : (await clientRecord(desc.minecraft, signal)).size;
 
   // the source's rows, and what each jar is known to provide
   const zips = new Map();   // row key -> JSZip of a jar fetched in this build
@@ -98,7 +96,7 @@ export async function buildPack({ schematic, source, ui, signal }) {
   const fetchSome = async (want, label) => {
     if (!want.length) return;
     // asked once per build, before the first file this browser does not have
-    for (const r of want) { const k = entryKey(r.entry); if (r.entry.origin?.type === "remote" && !(k && (await getFile(k)))) { await consent({ mods: want.length, source: desc.name, minecraft: desc.minecraft }); break; } }
+    for (const r of want) { const k = entryKey(r.entry); if (r.entry.origin?.type === "remote" && !(k && (await getFile(k)))) { await consent({ clientBytes: 0, mods: want.length, modBytes: 0, source: desc.name, minecraft: desc.minecraft }); break; } }
     const rowsIn = rows.map((r) => ({ ...r, selected: want.includes(r) }));
     const total = want.length;
     const run = fetchRows(rowsIn, {
@@ -131,17 +129,47 @@ export async function buildPack({ schematic, source, ui, signal }) {
   // find the namespaces nobody is known to provide: name matches first (a few rounds, the next best each time),
   // then, for a dropped pack, every local jar
   const tried = new Set([...provides.keys()]);
-  for (let round = 0; round < 4; round++) {
-    const missing = wanted.filter((ns) => !covered().has(ns));
-    if (!missing.length) break;
+  const pickRound = () => {
     const pick = new Set();
-    for (const ns of missing) {
-      const best = rows.filter((r) => !tried.has(r.entry.key)).map((r) => [r, matchScore(r, ns)]).filter(([, s]) => s > 0).sort((a, b) => b[1] - a[1] || a[0].entry.filename.length - b[0].entry.filename.length)[0];
+    for (const ns of wanted.filter((n) => !covered().has(n))) {
+      const best = rows.filter((r) => !tried.has(r.entry.key)).map((r) => [r, matchScore(r, ns)]).filter(([, sc]) => sc > 0).sort((a, b) => b[1] - a[1] || a[0].entry.filename.length - b[0].entry.filename.length)[0];
       if (best) pick.add(best[0]);
     }
-    if (!pick.size) break;
+    return [...pick];
+  };
+  // per namespace the jar with the most blockstates in it (an addon may ship a few of its parent's)
+  const bestRows = () => {
+    const out = new Map();
+    for (const ns of wanted) {
+      let best = null, n = 0;
+      for (const r of rows) { const c = provides.get(r.entry.key)?.[ns] ?? 0; if (c > n) { n = c; best = r; } }
+      if (best) out.set(ns, best);
+    }
+    return out;
+  };
+
+  // the visitor hears what the first download will be before it starts: the client jar and the jars this build
+  // expects to fetch (the known providers and the first name matches), sized by Modrinth's record of the files
+  const firstPick = pickRound();
+  {
+    const expected = [...new Set([...bestRows().values(), ...firstPick])];
+    const toDownload = [];
+    for (const r of expected) { const k = entryKey(r.entry); if (r.entry.origin?.type === "remote" && !(k && (await getFile(k)))) toDownload.push(r); }
+    let modBytes = 0;
+    const hashes = toDownload.map((r) => r.entry.sha512).filter(Boolean);
+    if (hashes.length) {
+      try {
+        const res = (await getVersionsFromHashes(hashes, "sha512", { userAgent: MODRINTH_UA })) ?? {};
+        for (const h of hashes) for (const f of res[h]?.files ?? []) if (f.hashes?.sha512 === h) modBytes += f.size ?? 0;
+      } catch (e) { report.notes.push(`Modrinth's file sizes: ${e.message}`); }
+    }
+    if (clientBytes || toDownload.length) await consent({ clientBytes, mods: toDownload.length, modBytes, minecraft: desc.minecraft, source: desc.name });
+  }
+  for (let round = 0; round < 4; round++) {
+    const pick = round === 0 ? firstPick : pickRound();
+    if (!pick.length) break;
     for (const r of pick) tried.add(r.entry.key);
-    await fetchSome([...pick], "finding the mods");
+    await fetchSome(pick, "finding the mods");
   }
   {
     const missing = wanted.filter((ns) => !covered().has(ns));
@@ -149,13 +177,8 @@ export async function buildPack({ schematic, source, ui, signal }) {
     if (missing.length && locals.length) { for (const r of locals) tried.add(r.entry.key); await fetchSome(locals, "looking through your jars"); }
   }
 
-  // per namespace the jar with the most blockstates in it (an addon may ship a few of its parent's)
-  const chosen = new Set();
-  for (const ns of wanted) {
-    let best = null, n = 0;
-    for (const r of rows) { const c = provides.get(r.entry.key)?.[ns] ?? 0; if (c > n) { n = c; best = r; } }
-    if (best) chosen.add(best); else report.missing.push(ns);
-  }
+  const best = bestRows(), chosen = new Set(best.values());
+  for (const ns of wanted) if (!best.has(ns)) report.missing.push(ns);
   await fetchSome([...chosen].filter((r) => !zips.has(r.entry.key)), "fetching the mods");
 
   // the client jar

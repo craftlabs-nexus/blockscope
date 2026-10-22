@@ -226,10 +226,12 @@ const PACK_CONSENT = "blockscope.consent";
 let consentWaiter = null;
 function askConsent(what) {
   try { if (localStorage.getItem(PACK_CONSENT) === "1") return Promise.resolve(); } catch {}
-  const mb = (n) => `${Math.round(n / 1e6)} MB`;
-  $("consentText").textContent = what.clientBytes
-    ? `To draw this schematic your browser downloads Minecraft ${what.minecraft}'s client jar from Mojang (${mb(what.clientBytes)})${what.mods ? ` and the jars of the ${what.mods} mod${what.mods === 1 ? "" : "s"} it uses from Modrinth (usually a few MB each), from the ${what.source} pack` : ""}: about ${mb(what.clientBytes + what.mods * 1.5e6)} the first time.`
-    : `This schematic uses ${what.mods} more mod${what.mods === 1 ? "" : "s"} of the ${what.source} pack: your browser downloads their jars from Modrinth (usually a few MB each).`;
+  const mb = (n) => (n >= 1e6 ? `${Math.round(n / 1e6)} MB` : `${Math.max(1, Math.round(n / 1e3))} kB`);
+  const parts = [];
+  if (what.clientBytes) parts.push(`Minecraft ${what.minecraft}'s client jar from Mojang (${mb(what.clientBytes)})`);
+  if (what.mods) parts.push(`the jar${what.mods === 1 ? "" : "s"} of the ${what.mods === 1 ? "mod" : `${what.mods} mods`} it uses, from the ${what.source} pack, from Modrinth${what.modBytes ? ` (${mb(what.modBytes)})` : ""}`);
+  const total = (what.clientBytes ?? 0) + (what.modBytes ?? 0);
+  $("consentText").textContent = `To draw this schematic your browser downloads ${parts.join(" and ")}${total && parts.length > 1 ? `: ${mb(total)} in all` : ""}. Later visits use the copies kept in this browser.`;
   $("consent").hidden = false; $("consentYes").focus();
   return new Promise((resolve, reject) => { consentWaiter = { resolve, reject }; });
 }
