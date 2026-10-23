@@ -76,7 +76,7 @@ export async function buildPack({ schematic, source, ui, signal }) {
   // the source's rows, and what each jar is known to provide
   const zips = new Map();   // row key -> JSZip of a jar fetched in this build
   let rows = [];
-  if (wanted.length) {
+  if (wanted.length && !source.none) {
     ui.progress(`reading the ${desc.name} pack…`);
     const analysis = await source.analyze(signal);
     const plan = await buildPlan(analysis, {

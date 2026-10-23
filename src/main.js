@@ -11,7 +11,7 @@ import { framedRealId } from "./framed.js";
 import { buildPaintings } from "./paintings.js";
 import { collectPoints, frameView, applyView, viewState, restoreView as restoreCamera, sizeFor, encodeGif } from "./buildgif.js";
 import { buildPack, packName, wantedNamespaces, PACK_PREFIX } from "./pack/build.js";
-import { defaultSource, droppedSource, fileSource } from "./pack/sources.js";
+import { noModsSource, droppedSource, fileSource } from "./pack/sources.js";
 import { REDSTONE_TWEAKS, extraPackBlob } from "./pack/extras.js";
 import { tidyRendererPacks, switchPack, keepBaseLowest, packManager } from "./pack/packs.js";
 import { clear as clearStore, usage } from "./pack/store.js";
@@ -242,20 +242,17 @@ function hideGhost() { if (ghost) { markGroup.remove(ghost); ghost.geometry.disp
 // ---- the resource pack ----------------------------------------------------------------------------------------------
 // The pack is built for the loaded file from a source, named after everything that goes into it; the renderer keeps
 // it and skips the build when it already holds that name. The source: the visitor's own pack when they gave one
-// (chosenSource); else the mods the file lists itself, when they cover every namespace its blocks use; else the
-// default mods.
-const DEFAULT_SOURCE = defaultSource();
-let chosenSource = null, source = DEFAULT_SOURCE, currentPack = null, packReport = null;
+// (chosenSource); else the mods the file lists itself; else none (Minecraft's own blocks: a file that lists no mods
+// needs the visitor's pack for its modded blocks).
+const NO_MODS = noModsSource();
+let chosenSource = null, source = NO_MODS, currentPack = null, packReport = null;
 const fileSources = new WeakMap();   // Schematic -> its mod list's source, or null
 function fileModsSource(schem) {
   if (!schem?.mods) return null;
-  if (!fileSources.has(schem)) {
-    const src = fileSource(schem.mods), covers = src?.covers();
-    fileSources.set(schem, src && wantedNamespaces(schem).every((n) => covers.has(n)) ? src : null);
-  }
+  if (!fileSources.has(schem)) fileSources.set(schem, fileSource(schem.mods));
   return fileSources.get(schem);
 }
-const autoSource = () => fileModsSource(file?.schem) ?? DEFAULT_SOURCE;
+const autoSource = () => fileModsSource(file?.schem) ?? NO_MODS;
 const pickSource = () => { source = chosenSource ?? autoSource(); };
 const PACK_CONSENT = "blockscope.consent";
 let consentWaiter = null;
@@ -307,17 +304,20 @@ async function readPackReport() {
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 function renderPackInfo() {
   const r = packReport, el = $("packInfo");
-  $("packSum").textContent = source.label;
-  // the button back from the visitor's own pack: to the file's mod list when it has one, else the default mods
+  const missing = r && !r.error ? r.missing?.length ?? 0 : 0;
+  $("packSum").textContent = source.label + (missing ? ` · ${missing} missing` : "");
+  // the button back from the visitor's own pack: to the file's mod list when it has one, else to no mods
   const auto = autoSource();
   $("packDefault").textContent = auto.label;
-  $("packDefault").title = auto.fromFile ? "Back to the mods this file lists (exactly the jars it was made with)" : "Back to the default mods";
+  $("packDefault").title = auto.fromFile ? "Back to the mods this file lists (exactly the jars it was made with)" : "Back to Minecraft's own blocks only (this file lists no mods)";
   $("packDefault").disabled = !chosenSource;
   if (!r) { el.textContent = "not built yet"; return; }
   if (r.error) { el.innerHTML = `<p class="err">${esc(r.error)}</p>`; return; }
   const mods = r.mods.map((m) => `<li><code>${esc(m.filename)}</code> → ${esc(m.namespaces.join(", ") || "(no blocks)")}</li>`).join("");
   el.innerHTML = `<p>Minecraft ${esc(r.minecraft)} from Mojang + ${r.mods.length} mod${r.mods.length === 1 ? "" : "s"} (${esc(r.source)})${r.size ? `, ${(r.size / 1e6).toFixed(1)} MB` : ""}${r.cached ? " (built on an earlier visit)" : r.seconds ? `, built in ${r.seconds} s, ${(r.downloaded / 1e6).toFixed(1)} MB downloaded` : ""}</p><ul>${mods}</ul>` +
-    (r.missing?.length ? `<p class="warn">No jar of the pack provides: ${r.missing.map((n) => `<code>${esc(n)}</code>`).join(", ")}</p>` : "") +
+    (r.missing?.length ? (source.none
+      ? `<p class="warn">This file lists no mods, so its blocks of ${r.missing.map((n) => `<code>${esc(n)}</code>`).join(", ")} have no textures: give your own pack (a mods folder, a .mrpack or a CurseForge zip).</p>`
+      : `<p class="warn">No jar of the pack provides: ${r.missing.map((n) => `<code>${esc(n)}</code>`).join(", ")}</p>`) : "") +
     (r.framed ? `<p>${r.framed} framed drawer material set${r.framed === 1 ? "" : "s"} composited${r.framedMissing?.length ? `; not found: ${r.framedMissing.map(esc).join(", ")}` : ""}</p>` : "") +
     (r.notes?.length ? `<p class="dim">${r.notes.map(esc).join("<br>")}</p>` : "");
 }
@@ -392,7 +392,7 @@ async function startRenderer() {
         onResourcePackLoaded: () => status("pack loaded, meshing…", "busy"),
         onSchematicLoaded: () => status(`${schemName} parsed, building meshes…`, "busy"),
         onSchematicRendered: () => {
-          status(capture.after ?? `rendered ${schemName}`); capture.after = null; pinGroup(); renderUnknown(); buildOverlayPaintings(); tuneControls(); keepBackground();
+          status(capture.after ?? `rendered ${schemName}${source.none && wantedNamespaces(file.schem).length ? ": it lists no mods, so its modded blocks need your own pack (File, Resource pack)" : ""}`); capture.after = null; pinGroup(); renderUnknown(); buildOverlayPaintings(); tuneControls(); keepBackground();
           attachMarks(); placeBox("pin", pinned.cell);
           if (capture.on) { capture.rendered?.(); return; }   // the build animation holds the camera itself
           if (savedView.on) restoreSoon();

@@ -322,7 +322,7 @@
                 <input id="packFolder" class="sr" type="file" webkitdirectory multiple />
                 <label class="btn" for="packFile" title="A Modrinth .mrpack or a CurseForge zip">Your pack file…</label>
                 <input id="packFile" class="sr" type="file" accept=".mrpack,.zip" />
-                <button id="packDefault" title="Back to the default mods" disabled>Default mods</button>
+                <button id="packDefault" title="Back to the mods this file lists" disabled>The file's mods</button>
               </div>
               <div class="bar packbar">
                 <button id="packForget" title="Delete the downloaded jars and built packs this browser keeps for Blockscope">Forget downloads</button>
@@ -341,7 +341,7 @@
     <p class="dim">Blockscope draws blocks with the game's own textures. Your browser downloads the Minecraft client jar from Mojang and the mods' jars from Modrinth, checks their hashes and keeps them in this browser for the next visit. Nothing is uploaded.</p>
     <div class="bar">
       <button id="consentYes" aria-pressed="true">Download</button>
-      <label class="btn" for="packFolder2" title="Your launcher instance or mods folder instead of the default mods">Use my mods folder…</label>
+      <label class="btn" for="packFolder2" title="Your launcher instance or mods folder instead of the mods this file lists">Use my mods folder…</label>
       <input id="packFolder2" class="sr" type="file" webkitdirectory multiple />
       <button id="consentNo">Not now</button>
     </div>
