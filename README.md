@@ -108,7 +108,7 @@ done. `package.json` is untouched: `npm run dev`, `npm run build` and the deploy
 
 | Parameter | Effect |
 |---|---|
-| `?schem=<path or URL>` | a plan file under the plans base (`VITE_PLANS_BASE`: the files bucket on the site, `/plans/` in development) or a URL on an allowed origin (the page's own, `https://files.craftlabs.nexus`, `https://gg.craftlabs.nexus`, `VITE_ALLOWED_ORIGINS`) |
+| `?schem=<name, path or URL>` | a plan file under the plans base (a name without its extension: its .schem, else .litematic, else .nbt) (`VITE_PLANS_BASE`: the files bucket on the site, `/plans/` in development) or a URL on an allowed origin (the page's own, `https://files.craftlabs.nexus`, `https://gg.craftlabs.nexus`, `VITE_ALLOWED_ORIGINS`) |
 | `?hide=roof,wall,floor`, `?roof=on`, `?roof=off` | the shell parts hidden at first (the roof starts hidden when it covers most of the footprint) |
 | `?part=a,b`, `?hidePart=a,b` | only those parts, or those parts hidden (names as the Parts list spells them) |
 | `?layer=below,N`, `?minY=M&maxY=N` | a layer mode at file layer N, or a layer range (N exclusive, negative from the top) |
