@@ -7,7 +7,9 @@ blocks show with their own textures. Nothing is uploaded and no server does any 
 
 It grew out of the CraftLabs storage plan's viewer, and draws that plan's files by
 default: the storage hall, the engine room and their test fixtures, with the generator's metadata (what each block
-is for), parts and paintings.
+is for), parts and paintings. The plan's `gull-rock.schem` is the demo: a lighthouse on a rock in the sea, every floor
+a part, a redstone cable up its stair, the keeper's log on its signs and three hidden keys, one for the layer slider,
+one for the Roof toggle and one for Inspect.
 
 ## What it does
 
