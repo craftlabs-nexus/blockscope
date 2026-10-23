@@ -116,6 +116,7 @@ done. `package.json` is untouched: `npm run dev`, `npm run build` and the deploy
 | `?at=x,y,z` | the block pinned in the Block panel, world coordinates (the address bar follows the pin; Copy in the Block panel, or <kbd>C</kbd>, copies it with this link) |
 | `?focus=x,y,z`, `?focus=<part>` | the camera flies to that block (world coordinates; it is pinned) or part once the file is drawn |
 | `?agent=1` | development only: the pack is downloaded without the consent prompt, for agents (`AGENTS.md`) |
+| `?digits=on`, `?digits=off` | signal digits (Redstone Tweaks) on or off once the file is drawn; Copy link adds `digits=on` while they are on, and without it the visitor's own choice stands |
 | `?sim=on` | the redstone simulator |
 | `?pick=off` | no block picking (the renderer's) |
 

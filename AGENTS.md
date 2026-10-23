@@ -83,6 +83,7 @@ A link can do it on load, without script (`ready()` resolves after it is applied
 | `?layer=below,N`, `?layer=single,N` | layers up to N, or only N (file layers, from 0) |
 | `?roof=on`, `?hide=roof,wall,floor` | the shell shown or hidden |
 | `?view=top` | the flat top view; `?view=top,Q,ZOOM` turns it Q quarters and zooms |
+| `?digits=on` | signal digits: signal strength on dust, repeater delays, comparator modes (a 1 MB pack from Modrinth) |
 | `?pick=off`, `?sim=on` | no block picking; the redstone simulator |
 
 For example, one part alone, framed: `?agent=1&schem=<file>&part=<part>&focus=<part>`.

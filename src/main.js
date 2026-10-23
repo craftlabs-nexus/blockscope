@@ -127,6 +127,8 @@ function setFile(f, { fromUrl = false } = {}) {
     // ?focus=x,y,z (world coordinates) or ?focus=<part>: the camera flies there once the file is drawn
     const fo = (params.get("focus") ?? "").trim(), fb = fo.match(/^(-?\d+),(-?\d+),(-?\d+)$/);
     focusWanted = fb ? { block: fb.slice(1).map(Number) } : fo ? { part: fo } : null;
+    // ?digits=on / ?digits=off: signal digits set to that once the file is drawn (none: the visitor's own choice)
+    digitsWanted = /^(on|off)$/.test(params.get("digits") ?? "") ? params.get("digits") === "on" : null;
   } else { shell.roof = !roofHiddenByDefault(); savedView.on = false; userMoved = false; pinned.wanted = null; focusWanted = null; }
   applyLayers(); showShellState(); renderParts(); showBlock(null);
   mats.fileChanged();
@@ -306,6 +308,7 @@ function attachMarks() {
 // the pinned block's file cell, so the mark survives a reload; `wanted` is a link's ?at= (world), pinned once drawn
 const pinned = { cell: null, wanted: null };
 let focusWanted = null;   // a link's ?focus= ({ block: [x, y, z] } world, or { part }), applied once the view settles
+let digitsWanted = null;   // a link's ?digits= (true or false), applied once the file is drawn
 function placeBox(which, cell) { attachMarks(); const box = which === "pin" ? pinBox : hoverBox; if (!box) return; if (!cell) { box.visible = false; } else { box.position.set(...cellCenter(cell.x, cell.y, cell.z)); box.visible = true; } redraw(); }
 // a part's cells (file coordinates) from the metadata, once per part; the ghost shows the ones in the layer range
 // whose shell part is not hidden (a hidden part still shows, that is what the ghost is for)
@@ -498,6 +501,7 @@ async function startRenderer() {
           readPackReport();
           loadBook();
           showRedstoneTweaks();
+          if (digitsWanted !== null) { const on = digitsWanted; digitsWanted = null; if (on !== !!redstoneTweaksPack()?.enabled) setDigits(on); }
         },
       },
     },
@@ -1007,14 +1011,18 @@ canvas.addEventListener("click", (ev) => {
 }, true);
 // Signal digits: the Redstone Tweaks resource pack (MIT, from Modrinth) on top of the built pack, drawing the signal
 // strength on dust, the delay on repeaters and the mode on comparators. It is on while the renderer holds that pack
-// (the renderer keeps packs between visits, so the choice is remembered); the zip is fetched once and kept.
+// (the renderer keeps packs between visits, so the choice is remembered); the zip is fetched once and kept. Off is
+// the default: the game's own look, and no extra download for a build that is not about redstone. The link carries
+// ?digits=on while it is on, and a link's ?digits= sets it.
 // a pack added on top: the lowest priority number, which wins in the renderer (one rebuild, no reordering after)
 const topPriority = (rpm) => Math.min(0, ...rpm.getAllPacks().map((p) => p.priority)) - 1;
 const redstoneTweaksPack = () => packManager(renderer)?.getAllPacks?.().find((p) => p.name === REDSTONE_TWEAKS.name) ?? null;
 function showRedstoneTweaks() { $("rtToggle").setAttribute("aria-pressed", String(!!redstoneTweaksPack()?.enabled)); }
-$("rtToggle").onclick = async () => {
+$("rtToggle").onclick = () => setDigits(!redstoneTweaksPack());
+async function setDigits(on) {
   const rpm = packManager(renderer); if (!rpm) { status("open a schematic first", "err"); return; }
   const have = redstoneTweaksPack();
+  if (on === !!have) { showRedstoneTweaks(); return; }
   try {
     if (have) { status("signal digits off…", "busy"); await rpm.removePack(have.id); status("signal digits off"); }
     else {
@@ -1024,8 +1032,8 @@ $("rtToggle").onclick = async () => {
       status("signal digits on (Redstone Tweaks): signal strength on dust, repeater delays, comparator modes");
     }
   } catch (e) { status(`signal digits: ${e.message}`, "err"); }
-  showRedstoneTweaks();
-};
+  showRedstoneTweaks(); syncUrl();
+}
 // Redstone simulation: the renderer bundles Nucleation's simulator (MCHPRS redpiler). Simulate compiles the loaded
 // schematic; clicking a lever then toggles it in the simulation, Tick advances one tick, Run ticks at 20/s. The dust
 // is the renderer's own, tinted by its power, rebuilt after every sync.
@@ -1363,6 +1371,8 @@ function syncUrl(now = false) {
     if (layer.mode !== "all") q.set("layer", `${layer.mode},${layer.cur}`); else q.delete("layer");
     const c = userMoved ? camText() : ""; if (c) q.set("cam", c); else q.delete("cam");
     if (topView.on) q.set("view", `top,${topView.q},${Math.round((camera()?.zoom ?? 1) * 1000) / 1000}`); else q.delete("view");
+    // signal digits: in the link while on (a link's own ?digits= stays until it is applied)
+    if (redstoneTweaksPack()?.enabled) q.set("digits", "on"); else if (digitsWanted === null) q.delete("digits");
     // the pinned block, world coordinates (a link's ?at= stays until the file is drawn and it is pinned)
     const pc = pinned.cell, [ox, oy, oz] = info.offset;
     if (pc) q.set("at", `${pc.x + ox},${pc.y + oy},${pc.z + oz}`); else if (!pinned.wanted) q.delete("at");
