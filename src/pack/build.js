@@ -78,8 +78,10 @@ export async function buildPack({ schematic, source, ui, signal }) {
   // the source's rows, and what each jar is known to provide
   const zips = new Map();   // row key -> JSZip of a jar fetched in this build
   let rows = [];
+  // what the jars come from, in words: the file's own list ("The file's mods" is a label, not a pack name), or a pack
+  const fromWords = source.fromFile ? "the file's mod list" : `the ${desc.name} pack`;
   if (wanted.length && !source.none) {
-    ui.progress(`reading the ${desc.name} pack…`);
+    ui.progress(`reading ${fromWords}…`);
     const analysis = await source.analyze(signal);
     const plan = await buildPlan(analysis, {
       skipClientOnly: false, contentStatus: null, modrinth: { userAgent: MODRINTH_UA },
@@ -218,7 +220,7 @@ export async function buildPack({ schematic, source, ui, signal }) {
   const chests = await addChests(out, clientZip);
   const framed = await addFramed(out, schematic.framedCombos());
   const pv = JSON.parse((await clientZip.file("version.json")?.async("string")) ?? "{}").pack_version;
-  out.file("pack.mcmeta", JSON.stringify({ pack: { pack_format: pv?.resource_major ?? pv?.resource ?? 1, description: `Blockscope: Minecraft ${desc.minecraft} + ${report.mods.length} mods of ${desc.name}` } }, null, 2));
+  out.file("pack.mcmeta", JSON.stringify({ pack: { pack_format: pv?.resource_major ?? pv?.resource ?? 1, description: `Blockscope: Minecraft ${desc.minecraft} + ${report.mods.length} mods from ${fromWords}` } }, null, 2));
   Object.assign(report, { vanillaFiles: vanilla, chests, framed: framed.made, framedMissing: framed.missing });
   // the materials list's recipe book, from the same jars (materials/book.js)
   ui.progress("reading the recipes…");
