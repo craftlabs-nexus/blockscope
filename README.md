@@ -120,7 +120,7 @@ done. `package.json` is untouched: `npm run dev`, `npm run build` and the deploy
 | `?pick=off` | no block picking (the renderer's) |
 
 Build settings: `VITE_PLANS_BASE`, `VITE_ALLOWED_ORIGINS` (comma separated), `VITE_DEFAULT_PLAN` (the file opened
-without `?schem=`; none unless set).
+without `?schem=`; none unless set, and `gull-rock.schem` in a production build, from `.env.production`).
 
 ## Block metadata in the file
 
@@ -168,8 +168,9 @@ Cloudflare's Git integration (Workers Builds) builds and deploys it from this re
 command `npm run build`, deploy command `npx wrangler deploy`, preview command the default (`npx wrangler preview`)
 for other branches; no build variables (`.node-version` pins Node 24; Node 20 or later works). `public/_headers` sets the
 cross-origin isolation headers, and a path that is no file answers 404. Check a build locally with `npm run build`
-then `npx wrangler dev` (or `npx wrangler deploy --dry-run`). Until plan files are published somewhere the page may
-read (`VITE_PLANS_BASE`, `VITE_DEFAULT_PLAN`), the site opens empty and takes a dropped or opened file.
+then `npx wrangler dev` (or `npx wrangler deploy --dry-run`). The site's own plan files are in `public/plans/`
+(served at `/plans/`): the Gull Rock lighthouse, `gull-rock.schem` with its paintings, copied from the storage plan,
+which the site opens by default (`.env.production`); `?schem=` opens any other file there or on an allowed origin.
 
 ## Files
 
@@ -186,6 +187,7 @@ read (`VITE_PLANS_BASE`, `VITE_DEFAULT_PLAN`), the site opens empty and takes a 
 | `vite.config.mjs` | the dev server (the plans route, cross-origin isolation headers, the checkouts with `BLOCKSCOPE_LINK`) |
 | `scripts/dev-local.mjs` | `npm run dev:local`: the renderer's watch build and the dev server against the checkouts beside this one |
 | `public/_headers` | the same headers for Cloudflare Pages |
+| `public/plans/`, `.env.production` | the site's own plan files (the Gull Rock lighthouse and its paintings) and the file it opens by default |
 
 ## Where the game's files come from
 
