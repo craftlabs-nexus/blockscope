@@ -63,6 +63,20 @@ for in its `fixtures/` and `framing-options/` subfolders. The folder is `BLOCKSC
 `.env.local`), by default `../../server/storage-plan`, the storage plan of the server repository checked out beside
 the folder that holds this one. Without it, open or drop a file.
 
+### With the renderer and Packrat checked out beside it
+
+To change the renderer or Packrat and see it here without publishing, check them out beside this folder
+(`../schematic-renderer`, `../packrat`; `BLOCKSCOPE_RENDERER`, `BLOCKSCOPE_PACKRAT` to point elsewhere) and run:
+
+```bash
+npm run dev:local  # http://localhost:5180, the first run installs both checkouts' dependencies
+```
+
+Packrat's TypeScript source is served as it is, so a change there reloads the page at once. The renderer is rebuilt
+by its own `npm run build:watch` (the ES build with source maps, about 7 s) and the page reloads when the build is
+done. `package.json` is untouched: `npm run dev`, `npm run build` and the deployed site use the published packages.
+`BLOCKSCOPE_LINK=1 npm run build` builds the site against the checkouts (the renderer's `dist/` as last built).
+
 ## Parameters
 
 | Parameter | Effect |
@@ -138,7 +152,8 @@ read (`VITE_PLANS_BASE`, `VITE_DEFAULT_PLAN`), the site opens empty and takes a 
 | `src/plans.js` | plan files: the schematic, its metadata and paintings |
 | `src/paintings.js`, `src/buildgif.js` | the paintings overlay; the build animation's framing and GIF encoding |
 | `src/pack/` | the pack: sources (packwiz or a dropped pack), the Mojang client jar, the build and the generated models, the page's IndexedDB, the renderer's stored packs |
-| `vite.config.mjs` | the dev server (the plans route, cross-origin isolation headers) |
+| `vite.config.mjs` | the dev server (the plans route, cross-origin isolation headers, the checkouts with `BLOCKSCOPE_LINK`) |
+| `scripts/dev-local.mjs` | `npm run dev:local`: the renderer's watch build and the dev server against the checkouts beside this one |
 | `public/_headers` | the same headers for Cloudflare Pages |
 
 ## Where the game's files come from

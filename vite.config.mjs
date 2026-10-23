@@ -1,4 +1,4 @@
-import { defineConfig, loadEnv } from "vite";
+import { defineConfig, loadEnv, searchForWorkspaceRoot } from "vite";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,16 +41,42 @@ function servePlans(root) {
 // copying without). The built site sends the same headers (public/_headers).
 const ISOLATION = { "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Embedder-Policy": "require-corp" };
 
+// `npm run dev:local` (BLOCKSCOPE_LINK set): the renderer and Packrat from the checkouts beside this one instead of
+// node_modules, so a change there shows here without publishing. Packrat is served from its TypeScript source; the
+// renderer from its dist/, which its `npm run build:watch` keeps current (its source needs its own Vite plugins).
+// One three.js and one Nucleation still: the renderer's bare imports resolve from this project.
+function linkedLibs(env) {
+  if (!env.BLOCKSCOPE_LINK) return null;
+  const renderer = path.resolve(HERE, env.BLOCKSCOPE_RENDERER ?? "../schematic-renderer");
+  const packrat = path.resolve(HERE, env.BLOCKSCOPE_PACKRAT ?? "../packrat");
+  const rendererEntry = path.join(renderer, "dist", "schematic-renderer.es.js");
+  const packratEntry = path.join(packrat, "src", "index.ts");
+  for (const f of [rendererEntry, packratEntry]) if (!fs.existsSync(f)) throw new Error(`[blockscope] BLOCKSCOPE_LINK: ${f} is missing`);
+  console.info(`[blockscope] linked: renderer ${renderer} (dist), packrat ${packrat} (src)`);
+  return {
+    resolve: {
+      alias: [
+        { find: /^@craftlabs\/schematic-renderer$/, replacement: rendererEntry },
+        { find: /^@craftlabs\/packrat$/, replacement: packratEntry },
+      ],
+      dedupe: ["three", "nucleation"],
+    },
+    fsAllow: [searchForWorkspaceRoot(HERE), renderer, packrat],
+  };
+}
+
 export default defineConfig(({ mode }) => {
   const env = { ...loadEnv(mode, HERE, ""), ...process.env };
   const plans = path.resolve(HERE, env.BLOCKSCOPE_PLANS ?? "../../server/storage-plan");
+  const linked = linkedLibs(env);
   return {
     plugins: [servePlans(plans)],
+    ...(linked && { resolve: linked.resolve }),
     // One three.js for the page's meshes and the renderer's scene, and the renderer's WASM where it expects it:
     // pre-bundling would move the renderer into .vite/deps, where its import.meta.url-relative nucleation_bg.wasm
     // does not exist.
     optimizeDeps: { exclude: ["three", "@craftlabs/schematic-renderer", "nucleation"] },
-    server: { port: 5180, strictPort: true, headers: ISOLATION },
+    server: { port: 5180, strictPort: true, headers: ISOLATION, ...(linked && { fs: { allow: linked.fsAllow } }) },
     preview: { port: 5181, strictPort: true, headers: ISOLATION },
     build: { target: "es2022", chunkSizeWarningLimit: 4000 },
     worker: { format: "es" },
