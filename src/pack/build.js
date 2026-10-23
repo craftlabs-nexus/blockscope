@@ -15,14 +15,16 @@ import { clientJar, clientRecord, hasClient } from "./mojang.js";
 import { fetchWithProgress } from "./download.js";
 import { addChests, addFramed } from "./generated.js";
 import { sha256Text } from "./sources.js";
+import { buildBook, BOOK_FILE } from "../materials/book.js";
 
 /** Bump when what the builder writes changes, so every cached pack is rebuilt. */
-export const GENERATOR = 1;
+export const GENERATOR = 2;   // 2: the materials list's recipe book (blockscope-materials.json) and the item textures
 export const PACK_PREFIX = "blockscope:";
 const MODRINTH_UA = "craftlabs-nexus/blockscope/0.1 (https://github.com/craftlabs-nexus/blockscope)";
 // what of the client jar goes in: the block assets and the textures block models and the renderer read (entity
-// textures for chests and signs' old layout, colormaps for tints, the font for sign text)
-const VANILLA_KEEP = ["blockstates/", "models/block/", "textures/block/", "textures/entity/", "textures/colormap/", "textures/font/", "textures/misc/", "textures/particle/", "textures/environment/"];
+// textures for chests and signs' old layout, colormaps for tints, the font for sign text, item textures for the materials
+// list's icons)
+const VANILLA_KEEP = ["blockstates/", "models/block/", "textures/block/", "textures/item/", "textures/entity/", "textures/colormap/", "textures/font/", "textures/misc/", "textures/particle/", "textures/environment/"];
 const MOD_ASSET = /^assets\/([a-z0-9_.-]+)\/(blockstates|models|textures)\/(.+)$/;
 
 /** The namespaces a schematic needs a jar for: its blocks' and its framed drawers' materials'. */
@@ -218,6 +220,13 @@ export async function buildPack({ schematic, source, ui, signal }) {
   const pv = JSON.parse((await clientZip.file("version.json")?.async("string")) ?? "{}").pack_version;
   out.file("pack.mcmeta", JSON.stringify({ pack: { pack_format: pv?.resource_major ?? pv?.resource ?? 1, description: `Blockscope: Minecraft ${desc.minecraft} + ${report.mods.length} mods of ${desc.name}` } }, null, 2));
   Object.assign(report, { vanillaFiles: vanilla, chests, framed: framed.made, framedMissing: framed.missing });
+  // the materials list's recipe book, from the same jars (materials/book.js)
+  ui.progress("reading the recipes…");
+  try {
+    const book = await buildBook([clientZip, ...rows.filter((r) => chosen.has(r)).map((r) => zips.get(r.entry.key)).filter(Boolean)], { onProgress: (t) => ui.progress(t) });
+    out.file(BOOK_FILE, JSON.stringify(book), { compression: "DEFLATE" });
+    report.book = { items: Object.keys(book.items).length, recipes: Object.keys(book.recipes).length };
+  } catch (e) { report.notes.push(`the recipes for the materials list: ${e.message}`); }
   out.file("blockscope-report.json", JSON.stringify(report, null, 2));
   const blob = await out.generateAsync({ type: "blob", compression: "STORE" }, (m) => ui.progress(`writing the pack: ${Math.round(m.percent)}%`, m.percent / 100));
   report.size = blob.size;

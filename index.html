@@ -25,6 +25,7 @@
       --warn: #f0c36d;
       --err: #ff8a8a;
       --north: #ff6b6b;
+      --have: #c9a4ff;
       --mono: ui-monospace, Consolas, "Cascadia Mono", monospace;
       --hud-w: 292px;
       --r: 6px;
@@ -209,6 +210,81 @@
     #footer button { padding: 0; border: 0; background: transparent; cursor: pointer; }
     #footer a:hover, #footer button:hover { color: var(--accent); }
 
+    /* Materials: the group in the panel (the scope, the biggest items, the sheet's button and the rollup), and the
+       sheet beside the panel: tools, totals, one row per item (icon, name, need, have, packed, ticked), footer. */
+    .mscope { display: flex; flex-wrap: wrap; gap: 4px; margin: 1px 0 6px; }
+    .mscope:empty { display: none; }
+    .chip { padding: 1px 7px; border-radius: 999px; background: var(--raised); color: var(--fg-key); font-size: 11px; line-height: 17px; white-space: nowrap; }
+    .chip.on { background: var(--accent-bg); color: #fff; }
+    .mrows { display: flex; flex-direction: column; margin: 0 -4px; }
+    .mmini { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto 70px; align-items: center; gap: 6px; height: 22px; padding: 0 4px; border-radius: 4px; cursor: pointer; }
+    .mmini:hover, .mmini[data-hover] { background: var(--raised); }
+    .mmini .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mmini .c { font: 11.5px var(--mono); }
+    .mmini .pk { font: 10.5px var(--mono); color: var(--fg-dim); text-align: right; white-space: nowrap; }
+    .mmini.more { color: var(--fg-dim); font-size: 11px; }
+    img.ic { width: 16px; height: 16px; image-rendering: pixelated; display: block; }
+    img.ic:not([src]), span.ic { width: 16px; height: 16px; border-radius: 3px; background: var(--raised); }
+    #matsOpen { flex: 1 1 auto; }
+    #mats { position: fixed; z-index: 3; top: 10px; left: calc(var(--hud-w) + 20px); width: 600px; max-width: calc(100vw - var(--hud-w) - 30px); max-height: calc(100vh - 20px);
+            display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: 9px; box-shadow: 0 8px 28px rgba(0, 0, 0, .45); backdrop-filter: blur(8px); }
+    #mats[hidden] { display: none; }
+    #mats .mtop, #mats .mtools, #mats .mtotals, #mats .mfoot { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 7px 10px; }
+    #mats .mtop { padding-right: 38px; }
+    #mats .mtop h2 { margin: 0; font-size: 10px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--fg-dim); }
+    #mats .mtools, #mats .mtotals { border-top: 1px solid var(--line-soft); }
+    #mats .mtools label { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--fg-dim); }
+    #mats .sp { flex: 1 1 auto; }
+    #mats select { font: inherit; font-size: 12px; height: 25px; color: var(--fg); background: var(--raised); border: 1px solid var(--line); border-radius: 5px; padding: 0 4px; }
+    #mats select option { background: #1f2329; }
+    #matsFilter { box-sizing: border-box; width: 120px; height: 25px; padding: 0 8px; font: inherit; font-size: 12px; color: var(--fg); background: var(--raised); border: 1px solid var(--line); border-radius: 5px; outline: none; }
+    #matsFilter:focus { border-color: var(--accent-line); }
+    #mats .mtotals { gap: 3px 16px; font-size: 11.5px; color: var(--fg-dim); font-variant-numeric: tabular-nums; }
+    #mats .mtotals b { color: var(--fg); font: 500 12px var(--mono); }
+    #mats .mtotals .ok, #mats .mtotals .ok b { color: var(--ok); }
+    #matsList { flex: 1 1 auto; min-height: 60px; overflow: auto; padding: 0 6px 6px; border-top: 1px solid var(--line-soft); scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+    #mats .mfoot { border-top: 1px solid var(--line-soft); font-size: 11px; color: var(--fg-dim); }
+    #mats .x { position: absolute; right: 8px; top: 7px; width: 22px; height: 22px; padding: 0; border-color: transparent; background: transparent; color: var(--fg-dim); }
+    .msec { display: flex; align-items: center; gap: 8px; padding: 10px 4px 3px; font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--fg-dim); }
+    .msec .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+    .msec .c { font: 400 10.5px var(--mono); letter-spacing: 0; text-transform: none; white-space: nowrap; }
+    .msec.warn .t { color: var(--warn); }
+    .msec .act { margin-left: auto; height: 20px; padding: 0 7px; font-size: 10.5px; letter-spacing: 0; text-transform: none; font-weight: 400; color: var(--fg-key); }
+    .mh, .mrow { display: grid; grid-template-columns: 16px 16px minmax(0, 1fr) 62px 64px 92px 16px; align-items: center; gap: 6px; padding: 0 4px; }
+    .mh { position: sticky; top: 0; z-index: 1; height: 22px; background: #1b1e23; font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-dim); border-bottom: 1px solid var(--line-soft); }
+    .mh .r { text-align: right; } .mh .hv { color: var(--have); }
+    .mrow { min-height: 25px; border-radius: 4px; }
+    .mrow:hover, .mrow[data-hover] { background: var(--raised); }
+    .mrow .tg { width: 16px; height: 18px; padding: 0; border: 0; background: transparent; color: var(--fg-dim); font-size: 10px; }
+    .mrow button.tg:hover { color: var(--fg); background: var(--raised-hover); }
+    .mrow .nm { min-width: 0; padding-left: calc(var(--d, 0) * 14px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mrow .nm.mono { font: 11.5px var(--mono); }
+    .mrow.made .nm { color: var(--fg-key); }
+    .mrow .ns, .mrow .for, .mrow .via { margin-left: 6px; font-size: 10.5px; color: var(--fg-dim); }
+    .mrow .for { font-family: var(--mono); }
+    .mrow .note { margin-left: 6px; font-size: 10.5px; color: var(--warn); }
+    .mrow .rc { margin-left: 6px; height: 19px; max-width: 220px; font-size: 10.5px; padding: 0 2px; }
+    .mrow .need { font: 12px var(--mono); text-align: right; font-variant-numeric: tabular-nums; }
+    .mrow .need.short { color: var(--warn); }
+    .mrow .have { box-sizing: border-box; width: 100%; height: 20px; padding: 0 5px; font: 12px var(--mono); text-align: right; color: var(--have); background: transparent; border: 1px solid transparent; border-radius: 4px; outline: none; }
+    .mrow .have::placeholder { color: var(--fg-dim); opacity: .5; }
+    .mrow:hover .have, .mrow .have:focus { background: var(--raised); border-color: var(--line); }
+    .mrow .have:focus { border-color: var(--have); }
+    .mrow .pk { font: 11px var(--mono); color: var(--fg-dim); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+    .mrow .got { width: 13px; height: 13px; margin: 0; accent-color: var(--ok); cursor: pointer; }
+    .mrow.done .nm, .mrow.done .need, .mrow.done .pk { color: var(--fg-dim); text-decoration: line-through; text-decoration-color: rgba(255, 255, 255, .25); }
+    .mrow.plain .nm { color: var(--fg-key); }
+    #mats .empty { padding: 10px 4px; }
+    #matsTip { position: absolute; z-index: 4; max-width: 300px; padding: 6px 9px; background: rgba(16, 18, 22, .97); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 20px rgba(0, 0, 0, .5); font-size: 11.5px; line-height: 1.45; pointer-events: none; display: none; }
+    #matsTip.on { display: block; }
+    #matsTip b { font-weight: 500; color: #fff; }
+    #matsTip .u { display: grid; grid-template-columns: auto 1fr; gap: 1px 10px; margin-top: 4px; }
+    #matsTip .u span:nth-child(odd) { font-family: var(--mono); text-align: right; color: var(--fg-key); }
+    #tip .mt { color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #tip .mt:empty { display: none; }
+    @media (max-width: 900px) { #mats { left: 10px; right: 10px; width: auto; max-width: none; z-index: 6; } }
+    @media (max-width: 560px) { .mh, .mrow { grid-template-columns: 14px 16px minmax(0, 1fr) 54px 54px 14px; } .mh .pk, .mrow .pk { display: none; } }
+
     @media (max-width: 480px) { :root { --hud-w: calc(100vw - 20px); } }
   </style>
 </head>
@@ -286,6 +362,21 @@
           <div class="parts" id="parts"></div>
         </div>
       </details>
+      <details class="grp" id="matsGrp" open>
+        <summary title="What the blocks in view take: the layers, the shell and the parts shown, unless the list is pinned. Hover a row to light its blocks up"><h2>Materials <span class="sum" id="matsSum"></span></h2></summary>
+        <div class="in">
+          <div class="mscope" id="matsGrpScope"></div>
+          <div class="mrows" id="matsTop"></div>
+          <div class="bar" style="margin-top: 7px">
+            <button id="matsOpen" aria-pressed="false" title="The whole list: what you have, how it packs, what it is made of (M)">List</button>
+            <div class="seg" id="matsPreset2" role="group" aria-label="rollup">
+              <button data-v="placed" title="The items the blocks are placed from">Placed</button>
+              <button data-v="gather" title="Crafted items broken down into what you go and get">Gather</button>
+              <button data-v="raw" title="Everything a recipe makes, broken down to what is mined, grown or dropped">Raw</button>
+            </div>
+          </div>
+        </div>
+      </details>
       <details class="grp" id="inspectGrp" open>
         <summary><h2>Block <span class="sum" id="inspectSum"></span></h2></summary>
         <div class="in">
@@ -340,6 +431,48 @@
       </details>
     </div>
   </aside>
+  <section id="mats" aria-label="materials list" hidden>
+    <div class="mtop">
+      <h2>Materials</h2>
+      <div class="mscope" id="matsScope" style="margin: 0"></div>
+      <button id="matsPin" class="toggle" aria-pressed="false" title="Keep counting this scope while you move the layers, the shell and the parts; again to follow the view">Pin</button>
+      <span class="sp"></span>
+      <div class="seg" role="group" aria-label="view">
+        <button id="matsTabList" aria-pressed="true" title="What to get, one row per item">List</button>
+        <button id="matsTabTree" aria-pressed="false" title="Each item with what it is made of: open or close a branch to make it or get it as it is">Tree</button>
+      </div>
+    </div>
+    <button class="x" id="matsClose" title="Close (M or Esc)">&#10005;</button>
+    <div class="mtools">
+      <div class="seg" id="matsPreset" role="group" aria-label="rollup">
+        <button data-v="placed" title="The items the blocks are placed from">Placed</button>
+        <button data-v="gather" title="Crafted items broken down into what you go and get: ingots, dyes, planks, stone">Gather</button>
+        <button data-v="raw" title="Everything a recipe makes, broken down to what is mined, grown or dropped">Raw</button>
+      </div>
+      <div class="seg" id="matsUnits" role="group" aria-label="units">
+        <button data-v="items" title="Counts as items">Items</button>
+        <button data-v="stacks" title="Counts as stacks and the rest">Stacks</button>
+        <button data-v="shulkers" title="Counts as shulker boxes (27 stacks), stacks and the rest">Shulkers</button>
+      </div>
+      <button id="matsCompact" class="toggle" aria-pressed="false" title="Ingots, nuggets, gems and the like as their 9-to-1 blocks">9×9</button>
+      <button id="matsHideDone" class="toggle" aria-pressed="false" title="Hide what you have all of">Hide got</button>
+      <label>Group <select id="matsGroup" aria-label="group by"><option value="none">none</option><option value="part">part</option><option value="layer">layer</option><option value="mod">mod</option></select></label>
+      <span class="sp"></span>
+      <input id="matsFilter" type="search" placeholder="filter…" autocomplete="off" spellcheck="false" />
+    </div>
+    <div class="mtotals" id="matsTotals"></div>
+    <div id="matsList"></div>
+    <div class="mfoot">
+      <span id="matsNote"></span>
+      <span class="sp"></span>
+      <button id="matsCopy" title="Copy the list as text">Copy</button>
+      <button id="matsMd" title="Download the list as a Markdown table">.md</button>
+      <button id="matsCsv" title="Download the list as CSV, for a spreadsheet">.csv</button>
+      <button id="matsJson" title="Download the list as JSON">.json</button>
+      <button id="matsReset" title="Forget what you have, ticked and chose to make or get for this file">Clear</button>
+    </div>
+    <div id="matsTip" role="tooltip"></div>
+  </section>
   <div id="consent" role="dialog" aria-modal="true" aria-labelledby="consentTitle" hidden>
     <h2 id="consentTitle">Build the resource pack?</h2>
     <p id="consentText"></p>
@@ -368,7 +501,7 @@
     <p>Your browser downloads them from Mojang (the Minecraft client) and Modrinth (the mods); they are never served from here.</p>
     <p>Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft.</p>
   </div>
-  <div id="tip" role="tooltip"><div class="id"></div><div class="st"></div><div class="pt"></div><div class="pos"></div></div>
+  <div id="tip" role="tooltip"><div class="id"></div><div class="st"></div><div class="pt"></div><div class="mt"></div><div class="pos"></div></div>
   <div id="help" role="dialog" aria-label="mouse and keyboard reference">
     <button class="x" id="helpClose" title="Close (Esc)">&#10005;</button>
     <h3>Mouse</h3>
@@ -394,6 +527,7 @@
       <dt><kbd>1</kbd>–<kbd>4</kbd></dt><dd>layers: all, single, below, above</dd>
       <dt><kbd>PgUp</kbd> <kbd>PgDn</kbd> or <kbd>[</kbd> <kbd>]</kbd></dt><dd>step a layer</dd>
       <dt><kbd>C</kbd></dt><dd>copy the pinned block (file, coordinates, block, part, link)</dd>
+      <dt><kbd>M</kbd></dt><dd>the materials list</dd>
       <dt><kbd>Esc</kbd></dt><dd>unpin the block, close this</dd>
       <dt><kbd>H</kbd></dt><dd>collapse the panel</dd>
       <dt><kbd>?</kbd></dt><dd>this reference</dd>
@@ -405,6 +539,13 @@
       <dt><kbd>eye</kbd></dt><dd>hide or show it</dd>
       <dt><kbd>solo</kbd></dt><dd>see it alone; again shows all</dd>
       <dt><kbd>double-click</kbd></dt><dd>fly to it</dd>
+    </dl>
+    <h3>Materials</h3>
+    <dl class="keys">
+      <dt><kbd>hover</kbd></dt><dd>lights up the blocks a row is for</dd>
+      <dt><kbd>&#9656;</kbd> / <kbd>&#9662;</kbd></dt><dd>make it from its ingredients / get it as it is</dd>
+      <dt>Have</dt><dd>120, 2s (stacks), 1sb (shulker boxes), 3b (blocks)</dd>
+      <dt><kbd>Enter</kbd></dt><dd>the next row's Have</dd>
     </dl>
   </div>
   <script type="module" src="/src/main.js"></script>

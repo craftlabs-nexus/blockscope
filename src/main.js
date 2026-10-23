@@ -16,6 +16,9 @@ import { REDSTONE_TWEAKS, extraPackBlob } from "./pack/extras.js";
 import { tidyRendererPacks, switchPack, keepBaseLowest, packManager } from "./pack/packs.js";
 import { clear as clearStore, usage } from "./pack/store.js";
 import { resolvePlan, loadPlan, optionalJson, DEFAULT_PLAN, SCHEMATIC_EXT } from "./plans.js";
+import { createMaterials } from "./materials/panel.js";
+import { prepareBook } from "./materials/engine.js";
+import { BOOK_FILE } from "./materials/book.js";
 
 const $ = (id) => document.getElementById(id);
 // Anything that breaks the page shows in the status line, not only in the console.
@@ -125,6 +128,7 @@ function setFile(f, { fromUrl = false } = {}) {
     focusWanted = fb ? { block: fb.slice(1).map(Number) } : fo ? { part: fo } : null;
   } else { shell.roof = !roofHiddenByDefault(); savedView.on = false; userMoved = false; pinned.wanted = null; focusWanted = null; }
   applyLayers(); showShellState(); renderParts(); showBlock(null);
+  mats.fileChanged();
 }
 /** Reads a schematic file's bytes into the page's file record. */
 async function readFile(rec) {
@@ -132,7 +136,10 @@ async function readFile(rec) {
   const schem = await Schematic.load(rec.bytes, rec.name);
   // a plan file's .meta.json beside it, fetched only for a file that carries no metadata of its own
   if (!rec.meta && rec.metaUrl && schem.metaSource !== "file") rec = { ...rec, meta: await optionalJson(rec.metaUrl) };
-  return { ...rec, schem };
+  // the file's hash: what the materials list keeps the person's have values under
+  let hash = null;
+  try { hash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", rec.bytes))].slice(0, 12).map((b) => b.toString(16).padStart(2, "0")).join(""); } catch {}
+  return { ...rec, schem, hash };
 }
 
 // The renderer builds block (x, y, z) of the file as a cube centered at local (x, y, z) (its edges fall on half
@@ -179,6 +186,68 @@ function applyLayers() {
   $("layerHidden").textContent = off.length ? `no ${off.join(", ")}` : "";
   $("layerSum").textContent = info.height ? (all ? (off.length ? `all, no ${off.join(", ")}` : "all") : `${layer.mode} y ${worldY(layer.cur)}`) : "";
   for (const m of ["All", "Single", "Below", "Above"]) $(`layer${m}`).setAttribute("aria-pressed", String(layer.mode === m.toLowerCase()));
+  if (!capture.on) mats.scopeChanged();
+}
+
+// ---- materials (materials/): the list counts what the view shows: the layers drawn (every layer in "all", the
+// roof then being hidden cells like the walls and floor), less the hidden shell and parts
+const mats = createMaterials({
+  $,
+  file: () => file,
+  meta: () => meta,
+  parts: () => info.parts,
+  worldY,
+  scope() {
+    const all = layer.mode === "all", lo = all ? 0 : layer.lo, hi = all ? Math.max(0, info.height - 1) : layer.hi;
+    const chips = [all ? "all layers" : lo === hi ? `y ${worldY(lo)}` : `y ${worldY(lo)}..${worldY(hi)}`, ...hiddenParts().map((p) => `no ${p}`)];
+    if (hiddenPartSet.size) chips.push(`${info.parts.length - hiddenPartSet.size} of ${info.parts.length} parts`);
+    return { lo, hi, hidden: file ? hiddenCells() : new Set(), chips };
+  },
+  highlight: (cells) => showMatCells(cells),
+  soloPart(name) {
+    const solo = soloed() === name;
+    hiddenPartSet.clear(); if (!solo) for (const q of info.parts) if (q.name !== name) hiddenPartSet.add(q.name);
+    renderParts(); reloadLayers(solo ? "every part" : `only ${name}`);
+  },
+  singleLayer(y) { layer.mode = "single"; layer.cur = y; reloadLayers(`layer ${y}`); },
+  status: (t, k) => status(t, k),
+  download: (blob, name) => download(blob, name),
+});
+// the recipe book rides in the pack (pack/build.js writes it): read once per pack, with the pack's textures for icons
+let packZipCache = { name: null, zip: null }, bookPack = null;
+async function packZip(name) {
+  if (packZipCache.name === name) return packZipCache.zip;
+  const p = packManager(renderer)?.getEnabledPacksWithBlobs?.().find((x) => x.name === name); if (!p) return null;
+  const zip = JSZip.loadAsync(p.blob);
+  packZipCache = { name, zip };
+  return zip;
+}
+async function loadBook() {
+  if (!renderer || bookPack === currentPack) return;
+  const name = currentPack; bookPack = name;
+  try {
+    const zip = await packZip(name); if (!zip) { bookPack = null; return; }
+    const f = zip.file(BOOK_FILE);
+    if (!f) { mats.setBook(null, null, "missing"); return; }
+    mats.setBook(null, null, "loading");
+    const book = prepareBook(JSON.parse(await f.async("string")));
+    if (name === currentPack) mats.setBook(book, (path) => zip.file(path)?.async("blob") ?? Promise.resolve(null));
+  } catch (e) { console.warn("[blockscope] the recipe book", e); mats.setBook(null, null, "missing"); }
+}
+// the blocks a materials row stands for, lit up in the view (amber, so they read apart from a part's blue)
+const matMat = new THREE.MeshBasicMaterial({ color: 0xf0c36d, transparent: true, opacity: 0.42, depthWrite: false });
+let matGhost = null;
+function showMatCells(cells) {
+  if (matGhost) { markGroup.remove(matGhost); matGhost.geometry.dispose(); matGhost = null; }
+  if (cells?.length && group()) {
+    attachMarks();
+    matGhost = new THREE.InstancedMesh(new THREE.BoxGeometry(1.04, 1.04, 1.04), matMat, cells.length);
+    const m = new THREE.Matrix4();
+    cells.forEach(([x, y, z], i) => { m.makeTranslation(...cellCenter(x, y, z)); matGhost.setMatrixAt(i, m); });
+    matGhost.instanceMatrix.needsUpdate = true; matGhost.renderOrder = 9;
+    markGroup.add(matGhost);
+  }
+  redraw();
 }
 
 // The renderer only warns (console) about blocks it has no blockstate for; collect those so they show in the HUD.
@@ -317,8 +386,7 @@ async function buildPackForFile(name) {
 async function readPackReport() {
   if (packReport?.name === currentPack) return;
   try {
-    const p = packManager(renderer)?.getEnabledPacksWithBlobs?.().find((x) => x.name === currentPack); if (!p) return;
-    const zip = await JSZip.loadAsync(p.blob);
+    const zip = await packZip(currentPack); if (!zip) return;
     const r = JSON.parse((await zip.file("blockscope-report.json")?.async("string")) ?? "null");
     if (r) { packReport = { ...r, name: currentPack, cached: true }; renderPackInfo(); }
   } catch {}
@@ -427,6 +495,7 @@ async function startRenderer() {
           updateGrid();
           syncUrl();
           readPackReport();
+          loadBook();
           showRedstoneTweaks();
         },
       },
@@ -664,6 +733,8 @@ function showTip(d) {
   tip.querySelector(".id").textContent = d.id.replace(/^minecraft:/, "");
   tip.querySelector(".st").textContent = d.state.length ? d.state.map(([k, v]) => `${k}=${v}`).join("  ") : "";
   tip.querySelector(".pt").textContent = d.part ? [d.part.item && itemText(d.part.item), d.part.owner, d.part.role].filter(Boolean).join(" · ") : d.extra ? d.extra.kind : "";
+  // the item the block is placed from (the file's own block, so a framed drawer reads as the mod's), and how many
+  tip.querySelector(".mt").textContent = d.cell && !d.hidden && file ? mats.describeKey(file.schem.idAt(file.schem.index(d.cell.x, d.cell.y, d.cell.z))) : "";
   tip.querySelector(".pos").textContent = d.pos.replace(/\s+\(file.*$/, "");
   tip.classList.add("on");
   const [x, y] = hoverPos, w = tip.offsetWidth, h = tip.offsetHeight;
@@ -872,7 +943,7 @@ async function reloadLayers(what) {
   applyLayers();
   unknown.clear();
   saveView();
-  hideGhost();
+  hideGhost(); showMatCells(null);
   status(`reloading ${what}…`, "busy");
   try { await renderer.schematicManager.loadSchematic(SCHEM_ID, await renderBytes()); } catch (e) { status(e.message, "err"); }
   restoreSoon();
@@ -1330,8 +1401,9 @@ addEventListener("keydown", (ev) => {
   else if (k === "1") setMode("all"); else if (k === "2") setMode("single"); else if (k === "3") setMode("below"); else if (k === "4") setMode("above");
   else if (k === "h" || k === "H") setCollapsed(!hud.classList.contains("collapsed"));
   else if (k === "c" || k === "C") copyBlock();
+  else if (k === "m" || k === "M") mats.toggleSheet();
   else if (k === "?" || (c === "Slash" && ev.shiftKey)) setHelp(!help.classList.contains("on"));
-  else if (k === "Escape") { if (about.classList.contains("on")) setAbout(false); else if (help.classList.contains("on")) setHelp(false); else showBlock(null); }
+  else if (k === "Escape") { if (about.classList.contains("on")) setAbout(false); else if (help.classList.contains("on")) setHelp(false); else if (!mats.close()) showBlock(null); }
   else return;
   ev.preventDefault();
 });
@@ -1499,6 +1571,8 @@ window.blockscope = {
   hitUnderPointer, schematicMeshes, controls, camera,
   // for agents (AGENTS.md): wait for a render, read the state, find and frame blocks and parts
   ready, nextRender: (timeout = 120000) => waitSettle(timeout), state: agentState, parts: partList, findBlocks, focusPart, focusBlock,
+  // the materials list (AGENTS.md): list({ preset, group }) as the sheet's JSON export, setHave(item, "2s"), state()
+  materials: { list: (o) => mats.list(o), setHave: (id, v) => mats.setHave(id, String(v)), state: () => mats.state(), toggle: () => mats.toggleSheet() },
 };
 window.inspectAt = pinWorld;
 

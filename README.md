@@ -47,6 +47,27 @@ one for the Roof toggle and one for Inspect.
   link is dimmed for a file from disk. Build downloads an animated GIF of the build going up a layer at a time. A
   resource pack dropped on the page, like Redstone Tweaks, goes above the built pack and wins over it. `?` lists the
   mouse and keyboard controls.
+- **Materials.** What the blocks in view take (`src/materials/`): the layers drawn, less the hidden shell and parts,
+  unless the list is pinned. The panel's group shows the biggest items; List (<kbd>M</kbd>) opens the sheet. A block
+  counts as the item it is placed from (a wall sign is a sign, dust is redstone, a door or bed is one item, a double
+  slab two, a water cauldron a cauldron and a bucket, a crop its seed from the block's loot table); water and lava
+  sources and blocks with no item found are listed apart, never in the totals; a sign adds its dye, glow ink and wax,
+  a framed drawer its three materials and one framing table. **Placed** lists those items, **Gather** breaks crafted
+  ones down to what a person goes and gets (ingots, dyes, planks, stone, smelted things), **Raw** down to what is
+  mined, grown or dropped. The recipes are the jars' own: the pack builder reads the client jar's and the mods'
+  recipes, tags, names and item models while it builds the pack and writes them into it as
+  `blockscope-materials.json` (`src/materials/book.js`), so they always match the pack; Fabric's conventional `c:`
+  tags, which no fetched jar defines, fall back to the vanilla items they stand for. One recipe per item is chosen by
+  cost (the stonecutter over the table, the table over the furnace); what a person gathers rather than makes
+  (cobblestone, andesite, logs, ingots) is never broken down. **Have**: a number, or `2s`, `1sb`, `3b` (stacks,
+  shulker boxes, 9-to-1 blocks), on any row, including a step in the middle of a recipe in the Tree tab (two iron
+  blocks in hand for four anvils: 90 fewer ingots); a tick means all of it. Demand flows down the recipes in dependency
+  order and each craft is rounded up to whole crafts, the spare kept. ▸ on a row makes that item from its ingredients
+  and ▾ gets it as it is, whatever the rollup. Units: items, stacks or shulker boxes, and 9×9 for ingots and the like
+  as blocks; the totals give stacks, shulker boxes and inventories. Group by part (with solo), by layer (bottom first,
+  what you have handed to the lowest layers first) or by mod. Hovering a row lights its blocks up in the view and says
+  what a made item goes into; hovering a block names its item and how many are in view. Have values, ticks and choices
+  are kept per file (by its hash) in this browser; Copy, `.md`, `.csv` and `.json` export the list.
 
 ## Running it
 
@@ -160,6 +181,7 @@ read (`VITE_PLANS_BASE`, `VITE_DEFAULT_PLAN`), the site opens empty and takes a 
 | `src/parts.js`, `src/framed.js` | the plan's parts and shell from its metadata; framed drawers' ids per material set |
 | `src/plans.js` | plan files: the schematic, its metadata and paintings |
 | `src/paintings.js`, `src/buildgif.js` | the paintings overlay; the build animation's framing and GIF encoding |
+| `src/materials/` | the materials list: the recipe book read from the jars (`book.js`), blocks to items, counting and rolling up (`engine.js`, no DOM), item icons from the pack's textures (`icons.js`), the group and the sheet (`panel.js`) |
 | `src/pack/` | the pack: sources (packwiz or a dropped pack), the Mojang client jar, the build and the generated models, the page's IndexedDB, the renderer's stored packs |
 | `vite.config.mjs` | the dev server (the plans route, cross-origin isolation headers, the checkouts with `BLOCKSCOPE_LINK`) |
 | `scripts/dev-local.mjs` | `npm run dev:local`: the renderer's watch build and the dev server against the checkouts beside this one |

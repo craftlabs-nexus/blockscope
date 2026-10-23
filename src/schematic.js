@@ -153,6 +153,12 @@ export class Schematic {
     for (const [i, id, be] of this.#framedCells()) { const f = framedViewerId(id, be); if (!out.has(f.id)) out.set(f.id, f); void i; }
     return [...out.values()];
   }
+  /** Every framed cell with its materials: [[block index, id, { side, trim, front }], …] (tokens as framed.js). */
+  framedCells() {
+    const out = [];
+    for (const [i, id, be] of this.#framedCells()) { const f = framedViewerId(id, be); out.push([i, id, { side: f.side, trim: f.trim, front: f.front }]); }
+    return out;
+  }
   *#framedCells() {
     const framed = new Map(); this.keys.forEach((k, i) => { if (k && framedKind(baseId(k))) framed.set(i, baseId(k)); });
     if (!framed.size) return;
