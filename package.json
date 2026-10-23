@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@craftlabs/packrat": "^0.2.0",
-    "@craftlabs/schematic-renderer": "^1.7.0",
+    "@craftlabs/schematic-renderer": "^1.7.2",
     "gif.js.optimized": "^1.0.1",
     "jszip": "^3.10.2",
     "three": "^0.184.0"

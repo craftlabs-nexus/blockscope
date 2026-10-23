@@ -917,14 +917,7 @@ function download(blob, name) {
 }
 const stem = () => schemName.replace(/\.[^.]+$/, "");
 /** A render of the view as a PNG Blob (also the console's and the test harness's way in). */
-const screenshot = (width = 1600, height = 1000) => shoot({ format: "image/png", width, height });
-// The renderer's takeScreenshot up to 1.7.1 restores the canvas at its backing-store size, which on a display scaled
-// above 100% grows the canvas with every shot (the live view zooms into a corner through Build). Fixed in the fork
-// (unreleased); until then the canvas is put back to its container's size after each shot.
-async function shoot(options) {
-  try { return await renderer.takeScreenshot(options); }
-  finally { renderer.renderManager?.updateCanvasSize?.(); }
-}
+const screenshot = (width = 1600, height = 1000) => renderer.takeScreenshot({ format: "image/png", width, height });
 window.saveScreenshot = async (name = `${stem()}.png`, width = 1600, height = 1000) => { download(await screenshot(width, height), name); status(`saved ${name}`); };
 $("shot").onclick = () => saveScreenshot();
 // The build animation (Build): an animated GIF of the schematic going up a layer at a time from the bottom, each frame
@@ -976,7 +969,7 @@ async function captureBuild() {
       await loadBelow(y);
       const n = drawnVertices(); if (n === drawn) continue; drawn = n;
       applyView(cam, ctl, view); redraw();
-      pngs.push(await shoot({ format: "image/png", width, height }));
+      pngs.push(await renderer.takeScreenshot({ format: "image/png", width, height }));
       delays.push(opt.delay);
     }
     delays[delays.length - 1] = opt.hold;
