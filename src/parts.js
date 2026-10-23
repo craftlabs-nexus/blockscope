@@ -23,11 +23,13 @@ const LAST = { "taps & shared runs": 1, network: 2, clock: 3, "drawer wall": 4, 
 const rank = (n) => LAST[n] ?? (n.startsWith("satellite: ") ? 4.5 : 0);   // the hall's satellites follow its drawer wall
 const partSort = (a, b) => rank(a) - rank(b) || a.localeCompare(b);
 
-/** Every part of a meta file with its block count, in display order. */
-export function partsOf(meta) {
+/** Every part of a meta file with its block count, in display order: the file's own order when it gives one
+ *  (`order`, BlockInfo Parts), any part it does not name after those; else the order above. */
+export function partsOf(meta, order = null) {
   const counts = new Map();
   for (const m of Object.values(meta)) { const p = partOf(m); if (p) counts.set(p, (counts.get(p) ?? 0) + 1); }
-  return [...counts].sort(([a], [b]) => partSort(a, b)).map(([name, count]) => ({ name, count }));
+  const at = new Map((order ?? []).map((n, i) => [n, i])), pos = (n) => at.get(n) ?? Infinity;
+  return [...counts].sort(([a], [b]) => (order ? pos(a) - pos(b) || 0 : 0) || partSort(a, b)).map(([name, count]) => ({ name, count }));
 }
 
 /** The shell part (roof, wall, floor) a metadata entry tags, or null: the hall says `shell` outright, the engine

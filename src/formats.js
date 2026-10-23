@@ -138,7 +138,8 @@ export function structureToSponge(value) {
  * BlockInfo, version 1, in a Sponge file's Metadata compound or at the root of any format:
  *   Origin (int array x, y, z): the world position of cell 0, 0, 0; Size (int array width, height, length): the box
  *   Cells counts; Records: the distinct entries, compounds of strings and lists of strings; Cells (int array, one per
- *   cell of the box, index (y * length + z) * width + x): 0 for a cell without an entry, else 1 + its index in Records.
+ *   cell of the box, index (y * length + z) * width + x): 0 for a cell without an entry, else 1 + its index in Records;
+ *   Parts (list of strings, optional): the parts in the order to list them.
  */
 export function readBlockInfo(value) {
   const r = value?.Schematic ?? value;
@@ -153,5 +154,34 @@ export function readBlockInfo(value) {
     const x = i % W, z = Math.floor(i / W) % L, y = Math.floor(i / (W * L));
     meta[`${x + origin[0]},${y + origin[1]},${z + origin[2]}`] = records[n - 1];
   }
-  return { origin, meta };
+  // the parts in the order the generator lists them, when it says
+  const parts = b.Parts ? list(b.Parts).filter((n) => typeof n === "string") : null;
+  return { origin, meta, parts: parts?.length ? parts : null };
+}
+
+/**
+ * The mod list a file carries (a Mods compound, version 1, in a Sponge file's Metadata or at the root of any format),
+ * or null: { minecraft, loader, loaderVersion, list: [{ name, modId, project, versionId, file, url, size, sha512,
+ * sha1, namespaces }] }. Only entries with a file name, a URL and a sha512 are kept; where a jar may be fetched from
+ * is the pack source's to decide (sources.js fileSource).
+ */
+export function readMods(value) {
+  const r = value?.Schematic ?? value;
+  const m = r?.Metadata?.Mods ?? r?.Mods;
+  if (!m || num(m.Version) !== 1) return null;
+  const str = (v) => (typeof v === "string" ? v : null);
+  const list = list_(m.List).map((e) => ({
+    name: str(e.Name), modId: str(e.ModId), project: str(e.Project), versionId: str(e.VersionId), file: str(e.File), url: str(e.Url),
+    size: e.Size === undefined ? null : num(e.Size), sha512: str(e.Sha512)?.toLowerCase() ?? null, sha1: str(e.Sha1)?.toLowerCase() ?? null,
+    namespaces: list_(e.Namespaces).filter((n) => typeof n === "string"),
+  })).filter((e) => e.file && e.url && /^[0-9a-f]{128}$/.test(e.sha512 ?? ""));
+  return { minecraft: str(m.Minecraft), loader: str(m.Loader), loaderVersion: str(m.LoaderVersion), list };
+}
+const list_ = list;
+
+/** A file's description: Sponge's or Litematica's Metadata Description, or null. */
+export function readDescription(value) {
+  const r = value?.Schematic ?? value;
+  const d = r?.Metadata?.Description;
+  return typeof d === "string" && d ? d : null;
 }

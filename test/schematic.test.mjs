@@ -164,3 +164,28 @@ test("a file is read by what it holds, not its name", async () => {
   const s = await Schematic.load(await gzip(encodeNbt({ name: "", value: litematic() })), "misnamed.schem");
   assert.equal(s.format, "litematic");
 });
+
+test("the file's mod list: read from the file, only Modrinth's CDN with a sha512, namespaces told to the build", async () => {
+  const { fileSource } = await import("../src/pack/sources.js");
+  const mod = (name, url, ns, sha = "a") => ({ Name: name, ModId: name, Project: "P", VersionId: "V", File: `${name}.jar`, Url: url, Size: i32(5), Sha512: sha.repeat(128), Sha1: "b".repeat(40), Namespaces: list(8, ns) });
+  const sp = sample();
+  sp.value.Metadata = { Mods: { Version: i32(1), Minecraft: "26.2", Loader: "fabric", LoaderVersion: "0.19.5", List: list(10, [
+    mod("storagedrawers", "https://cdn.modrinth.com/data/guitPqEi/versions/cJA3JdCZ/StorageDrawers.jar", ["storagedrawers"]),
+    mod("promenade", "https://cdn.modrinth.com/data/P3/versions/V3/p.jar", ["promenade"], "c"),
+    mod("evil", "https://example.com/evil.jar", ["evil"], "d"),
+    mod("nohash", "https://cdn.modrinth.com/data/P4/versions/V4/n.jar", ["nohash"], "zz"),
+  ]) }, BlockInfo: { Version: i32(1), Origin: new Int32Array([10, 64, -5]), Size: new Int32Array([3, 4, 2]), Parts: list(8, ["z part", "a part"]), Records: list(10, [{ part: "a part" }, { part: "z part" }]), Cells: Int32Array.from({ length: 24 }, (_, i) => (i === 0 ? 1 : i === 1 ? 2 : 0)) } };
+  const s = await Schematic.load(await gzip(encodeNbt(sp)), "t.schem");
+  assert.equal(s.mods.minecraft, "26.2");
+  assert.deepEqual(s.mods.list.map((m) => m.file), ["storagedrawers.jar", "promenade.jar", "evil.jar"], "an entry without a sha512 is dropped on reading");
+  assert.deepEqual(partsOf(s.meta, s.partOrder).map((p) => p.name), ["z part", "a part"], "the file's own order");
+  const src = fileSource(s.mods);
+  assert.deepEqual([...src.covers()].sort(), ["promenade", "storagedrawers"], "an entry off Modrinth's CDN is dropped");
+  const d = await src.describe();
+  assert.equal(d.minecraft, "26.2");
+  assert.match(d.id, /^file:[0-9a-f]{32}$/);
+  const a = await src.analyze();
+  assert.deepEqual(a.entries.map((e) => [e.filename, e.origin.url.startsWith("https://cdn.modrinth.com/"), e.sha512.length]), [["storagedrawers.jar", true, 128], ["promenade.jar", true, 128]]);
+  assert.deepEqual(src.provides().get(a.entries[0].key), { storagedrawers: 1 });
+  assert.equal(fileSource({ list: [] }), null);
+});

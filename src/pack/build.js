@@ -87,6 +87,9 @@ export async function buildPack({ schematic, source, ui, signal }) {
     rows = plan.rows.filter((r) => r.entry.origin && r.status.kind !== "unresolvable" && r.entry.side !== "server" && /\.jar$/i.test(r.entry.filename));
   }
   const provides = new Map();   // row key -> { ns: blockstate count }
+  // what the source says each jar provides (a file's own mod list), then what this browser learned by scanning
+  const told = source.provides?.() ?? new Map();
+  for (const r of rows) if (told.has(r.entry.key)) provides.set(r.entry.key, told.get(r.entry.key));
   for (const r of rows) { const k = entryKey(r.entry); const rec = k && (await get("jars", k)); if (rec?.namespaces) provides.set(r.entry.key, rec.namespaces); }
   const covered = () => new Set(wanted.filter((ns) => [...provides.values()].some((c) => c[ns])));
 

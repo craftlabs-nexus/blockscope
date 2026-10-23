@@ -10,8 +10,8 @@ import { partOf, partsOf, shellPart } from "./parts.js";
 import { framedRealId } from "./framed.js";
 import { buildPaintings } from "./paintings.js";
 import { collectPoints, frameView, applyView, viewState, restoreView as restoreCamera, sizeFor, encodeGif } from "./buildgif.js";
-import { buildPack, packName, PACK_PREFIX } from "./pack/build.js";
-import { defaultSource, droppedSource } from "./pack/sources.js";
+import { buildPack, packName, wantedNamespaces, PACK_PREFIX } from "./pack/build.js";
+import { defaultSource, droppedSource, fileSource } from "./pack/sources.js";
 import { REDSTONE_TWEAKS, extraPackBlob } from "./pack/extras.js";
 import { tidyRendererPacks, switchPack, keepBaseLowest, packManager } from "./pack/packs.js";
 import { clear as clearStore, usage } from "./pack/store.js";
@@ -73,7 +73,8 @@ function setFile(f, { fromUrl = false } = {}) {
   meta = own ?? f.meta ?? f.schem.meta ?? null;
   metaFrom = own ? "the file's own metadata" : f.meta ? `${f.name.replace(/\.[^.]+$/, "")}.meta.json` : f.schem.metaSource === "regions" ? "the Litematica file's regions" : "";
   $("partsGrp").querySelector("summary").title = `The file's parts, from ${metaFrom || "its metadata"}: hover to light one up, click the eye to hide it, solo to see it alone, click the name to fly to it`;
-  $("schemName").textContent = schemName; $("schemName").title = f.url ? f.url.href : `${schemName} (opened from disk; stays in this page)`;
+  $("schemName").textContent = schemName;
+  $("schemName").title = (f.url ? f.url.href : `${schemName} (opened from disk; stays in this page)`) + (f.schem.description ? `\n${f.schem.description}` : "");
   document.title = `${schemName} · Blockscope`;
   // a link can bring back only a file that was opened from a link (?schem=), not one from disk; dimmed (not disabled,
   // so its tooltip still shows and a click says why)
@@ -82,7 +83,9 @@ function setFile(f, { fromUrl = false } = {}) {
     : "A file opened from disk cannot be linked: a link could not bring it back";
   const s = f.schem, { counts, parts, roofCover } = s.shellOf(meta);
   shellCells = parts; hiddenCache = { key: null, set: null }; partCells.clear(); frontCache = { name: null, dir: null };
-  Object.assign(info, s.info(), { shell: counts, roofCover, meta: meta !== null, parts: meta ? partsOf(meta) : [] });
+  Object.assign(info, s.info(), { shell: counts, roofCover, meta: meta !== null, parts: meta ? partsOf(meta, own ? s.partOrder : null) : [] });
+  // the pack source for this file (its own mod list, unless the visitor gave their own pack)
+  const before = source; pickSource(); if (source !== before) { packReport = null; renderPackInfo(); }
   signAt.clear(); for (const sg of s.signs) signAt.set(`${sg.x},${sg.y},${sg.z}`, sg);
   // the shell and the parts: from the link on the first load, else the defaults (the roof hidden when it covers most
   // of the footprint)
@@ -237,9 +240,23 @@ function showGhost(name) {
 function hideGhost() { if (ghost) { markGroup.remove(ghost); ghost.geometry.dispose(); ghost = null; redraw(); } }
 
 // ---- the resource pack ----------------------------------------------------------------------------------------------
-// The pack is built for the loaded file from a source (the default mods, or the visitor's own), named after
-// everything that goes into it; the renderer keeps it and skips the build when it already holds that name.
-let source = defaultSource(), currentPack = null, packReport = null;
+// The pack is built for the loaded file from a source, named after everything that goes into it; the renderer keeps
+// it and skips the build when it already holds that name. The source: the visitor's own pack when they gave one
+// (chosenSource); else the mods the file lists itself, when they cover every namespace its blocks use; else the
+// default mods.
+const DEFAULT_SOURCE = defaultSource();
+let chosenSource = null, source = DEFAULT_SOURCE, currentPack = null, packReport = null;
+const fileSources = new WeakMap();   // Schematic -> its mod list's source, or null
+function fileModsSource(schem) {
+  if (!schem?.mods) return null;
+  if (!fileSources.has(schem)) {
+    const src = fileSource(schem.mods), covers = src?.covers();
+    fileSources.set(schem, src && wantedNamespaces(schem).every((n) => covers.has(n)) ? src : null);
+  }
+  return fileSources.get(schem);
+}
+const autoSource = () => fileModsSource(file?.schem) ?? DEFAULT_SOURCE;
+const pickSource = () => { source = chosenSource ?? autoSource(); };
 const PACK_CONSENT = "blockscope.consent";
 let consentWaiter = null;
 function askConsent(what) {
@@ -247,7 +264,8 @@ function askConsent(what) {
   const mb = (n) => (n >= 1e6 ? `${Math.round(n / 1e6)} MB` : `${Math.max(1, Math.round(n / 1e3))} kB`);
   const parts = [];
   if (what.clientBytes) parts.push(`Minecraft ${what.minecraft}'s client jar from Mojang (${mb(what.clientBytes)})`);
-  if (what.mods) parts.push(`the jar${what.mods === 1 ? "" : "s"} of the ${what.mods === 1 ? "mod" : `${what.mods} mods`} it uses, from the ${what.source} pack, from Modrinth${what.modBytes ? ` (${mb(what.modBytes)})` : ""}`);
+  const from = source.fromFile ? "as the file lists them" : `from the ${what.source} pack`;
+  if (what.mods) parts.push(`the jar${what.mods === 1 ? "" : "s"} of the ${what.mods === 1 ? "mod" : `${what.mods} mods`} it uses, ${from}, from Modrinth${what.modBytes ? ` (${mb(what.modBytes)})` : ""}`);
   const total = (what.clientBytes ?? 0) + (what.modBytes ?? 0);
   $("consentText").textContent = `To draw this schematic your browser downloads ${parts.join(" and ")}${total && parts.length > 1 ? `: ${mb(total)} in all` : ""}. Later visits use the copies kept in this browser.`;
   $("consent").hidden = false; $("consentYes").focus();
@@ -290,6 +308,11 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
 function renderPackInfo() {
   const r = packReport, el = $("packInfo");
   $("packSum").textContent = source.label;
+  // the button back from the visitor's own pack: to the file's mod list when it has one, else the default mods
+  const auto = autoSource();
+  $("packDefault").textContent = auto.label;
+  $("packDefault").title = auto.fromFile ? "Back to the mods this file lists (exactly the jars it was made with)" : "Back to the default mods";
+  $("packDefault").disabled = !chosenSource;
   if (!r) { el.textContent = "not built yet"; return; }
   if (r.error) { el.innerHTML = `<p class="err">${esc(r.error)}</p>`; return; }
   const mods = r.mods.map((m) => `<li><code>${esc(m.filename)}</code> → ${esc(m.namespaces.join(", ") || "(no blocks)")}</li>`).join("");
@@ -308,9 +331,9 @@ async function ensurePack() {
   currentPack = name; await keepBaseLowest(renderer);
   readPackReport();
 }
-/** Switches to the visitor's pack (a Packrat analysis) or back to the default (null). */
+/** Switches to the visitor's pack (a Packrat analysis) or back to the file's mods or the default ones (null). */
 async function useSource(next) {
-  source = next ?? defaultSource(); packReport = null; currentPack = null; renderPackInfo();
+  chosenSource = next ?? null; pickSource(); packReport = null; currentPack = null; renderPackInfo();
   if (!renderer || !file) return;
   try { await ensurePack(); status(`pack: ${source.label}`); } catch (e) { status(`pack: ${e.message}`, "err"); }
 }

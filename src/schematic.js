@@ -6,7 +6,7 @@
 // .schematic) by Nucleation, the renderer's WASM. The block metadata comes from the file when it carries some
 // (BlockInfo, formats.js), and a Litematica file's regions stand in for parts in a file without it.
 import { readNbt, encodeNbt, gzip, decodeVarints, encodeVarints } from "./nbt.js";
-import { formatOf, litematicToSponge, structureToSponge, readBlockInfo } from "./formats.js";
+import { formatOf, litematicToSponge, structureToSponge, readBlockInfo, readMods, readDescription } from "./formats.js";
 import { framedKind, framedViewerId } from "./framed.js";
 import { partOf, shellPart } from "./parts.js";
 
@@ -38,11 +38,13 @@ export class Schematic {
     try { nbt = await readNbt(u8); } catch { /* not NBT this page reads: Nucleation's turn */ }
     const format = nbt ? formatOf(nbt.value) : null;
     const info = nbt ? readBlockInfo(nbt.value) : null;
+    const mods = nbt ? readMods(nbt.value) : null, description = nbt ? readDescription(nbt.value) : null;
     let regions = null, regionOf = null;
     if (format === "litematic") ({ value: nbt.value, regions, regionOf } = litematicToSponge(nbt.value));
     else if (format === "structure") nbt.value = structureToSponge(nbt.value).value;
     else if (format !== "sponge") nbt = await readNbt(await toSponge(u8));
     const s = new Schematic(nbt, name, { format: format ?? "converted", info });
+    s.mods = mods; s.description = description;
     if (regions?.length > 1) s.#useRegions(regions, regionOf);
     return s;
   }
@@ -56,6 +58,10 @@ export class Schematic {
      *  from: "file" (BlockInfo), "regions" (a Litematica file's), or null. regions: a Litematica file's, else null. */
     this.meta = info?.meta ?? null;
     this.metaSource = this.meta ? "file" : null;
+    /** The parts in the order the file lists them (BlockInfo Parts), or null. */
+    this.partOrder = info?.parts ?? null;
+    /** The mod list the file carries (formats.js readMods), or null; its description, or null. */
+    this.mods = null; this.description = null;
     this.regions = null;
     // v1/v2 keep Width, Palette and BlockData at the root; v3 nests the root under Schematic and the blocks under Blocks
     this.v3 = !!nbt.value.Schematic;
