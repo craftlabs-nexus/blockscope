@@ -2,9 +2,11 @@
 // its size and world offset, whether its top layer is a roof, its shell (roof, walls, floor), its parts' cells, its
 // signs, its namespaces and framed material sets, how many blocks each layer has, and the file the renderer gets
 // (layers sliced off, hidden cells turned to air, framed drawers renamed per material set). A Sponge .schem is read
-// as it is; a .litematic, an MCEdit .schematic or a structure .nbt is converted to one by Nucleation (the renderer's
-// WASM) first.
+// as it is; a .litematic or a structure .nbt is turned into one in the page (formats.js), anything else (an MCEdit
+// .schematic) by Nucleation, the renderer's WASM. The block metadata comes from the file when it carries some
+// (BlockInfo, formats.js), and a Litematica file's regions stand in for parts in a file without it.
 import { readNbt, encodeNbt, gzip, decodeVarints, encodeVarints } from "./nbt.js";
+import { formatOf, litematicToSponge, structureToSponge, readBlockInfo } from "./formats.js";
 import { framedKind, framedViewerId } from "./framed.js";
 import { partOf, shellPart } from "./parts.js";
 
@@ -29,30 +31,59 @@ async function toSponge(bytes) {
 }
 
 export class Schematic {
-  /** Reads a schematic from its bytes; `name` decides the format (.schem is read as is, anything else converted). */
+  /** Reads a schematic from its bytes, whatever its name says: its contents decide the format. */
   static async load(bytes, name) {
-    let u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-    let nbt = await readNbt(u8);
-    if (!/\.schem$/i.test(name) || !Schematic.isSponge(nbt)) { u8 = await toSponge(u8); nbt = await readNbt(u8); }
-    return new Schematic(nbt, name);
+    const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    let nbt = null;
+    try { nbt = await readNbt(u8); } catch { /* not NBT this page reads: Nucleation's turn */ }
+    const format = nbt ? formatOf(nbt.value) : null;
+    const info = nbt ? readBlockInfo(nbt.value) : null;
+    let regions = null, regionOf = null;
+    if (format === "litematic") ({ value: nbt.value, regions, regionOf } = litematicToSponge(nbt.value));
+    else if (format === "structure") nbt.value = structureToSponge(nbt.value).value;
+    else if (format !== "sponge") nbt = await readNbt(await toSponge(u8));
+    const s = new Schematic(nbt, name, { format: format ?? "converted", info });
+    if (regions?.length > 1) s.#useRegions(regions, regionOf);
+    return s;
   }
-  static isSponge(nbt) { const r = nbt.value?.Schematic ?? nbt.value; return !!(r?.Width && (r.Palette || r.Blocks?.Palette)); }
+  static isSponge(nbt) { return formatOf(nbt?.value) === "sponge"; }
 
-  constructor(nbt, name) {
+  constructor(nbt, name, { format = "sponge", info = null } = {}) {
     this.name = name;
     this.nbt = nbt;
+    this.format = format;   // sponge, litematic, structure, or converted (by Nucleation)
+    /** The file's own block metadata (keyed "x,y,z" in world coordinates) or null; metaSource says where any came
+     *  from: "file" (BlockInfo), "regions" (a Litematica file's), or null. regions: a Litematica file's, else null. */
+    this.meta = info?.meta ?? null;
+    this.metaSource = this.meta ? "file" : null;
+    this.regions = null;
     // v1/v2 keep Width, Palette and BlockData at the root; v3 nests the root under Schematic and the blocks under Blocks
     this.v3 = !!nbt.value.Schematic;
     this.root = nbt.value.Schematic ?? nbt.value;
     this.blocks = this.root.Blocks?.Palette ? this.root.Blocks : this.root;
     this.width = num(this.root.Width); this.height = num(this.root.Height); this.length = num(this.root.Length);
     const o = this.root.Offset;
-    this.offset = o ? Array.from(o.v ?? o, Number) : [0, 0, 0];
+    // a format with no offset of its own takes the world position its BlockInfo gives, so a cell has the same world
+    // position (and metadata key) in each of a build's files
+    this.offset = o && format === "sponge" ? Array.from(o.v ?? o, Number) : info ? info.origin.slice() : o ? Array.from(o.v ?? o, Number) : [0, 0, 0];
     this.keys = []; for (const [k, v] of Object.entries(this.blocks.Palette)) this.keys[num(v)] = k;
     this.data = decodeVarints(this.blocks.BlockData ?? this.blocks.Data);
     this.air = new Set(this.keys.map((k, i) => (k && AIR.test(baseId(k)) ? i : -1)).filter((i) => i >= 0));
     this.entities = Array.from(this.blocks.BlockEntities?.v ?? this.root.TileEntities?.v ?? []);
     this.signs = this.#readSigns();
+  }
+
+  /** A Litematica file's regions as its parts, when it carries no metadata: each placed block's entry is { part }. */
+  #useRegions(regions, regionOf) {
+    this.regions = regions;
+    if (this.meta) return;
+    const meta = {}, [ox, oy, oz] = this.offset, entry = regions.map((r) => ({ part: r.name }));
+    for (let i = 0; i < regionOf.length; i++) {
+      if (!regionOf[i]) continue;
+      const [x, y, z] = this.cellOf(i);
+      meta[`${x + ox},${y + oy},${z + oz}`] = entry[regionOf[i] - 1];
+    }
+    this.meta = meta; this.metaSource = "regions";
   }
 
   get perLayer() { return this.width * this.length; }
@@ -79,8 +110,9 @@ export class Schematic {
   metaAt(meta, x, y, z) { const [ox, oy, oz] = this.offset; return meta?.[`${x + ox},${y + oy},${z + oz}`] ?? null; }
 
   /** Every shell cell: Map of block index -> part, how many cells each part has, and the share of the footprint the
-   *  roof covers. From the metadata when there is any, else the inert blocks on the outside of a roofed box. */
+   *  roof covers. From the metadata when it tags any shell, else the inert blocks on the outside of a roofed box. */
   shellOf(meta) {
+    if (meta && !Object.values(meta).some((m) => shellPart(m))) meta = null;
     const roofed = this.info().roof;
     const parts = new Map(), counts = { roof: 0, wall: 0, floor: 0 };
     for (let i = 0; i < this.data.length; i++) {
@@ -177,6 +209,9 @@ export class Schematic {
     if (blocks.PaletteMax) blocks.PaletteMax = { t: 3, v: next };
     if (this.blocks.BlockEntities) blocks.BlockEntities = { ...this.blocks.BlockEntities, v: this.blocks.BlockEntities.v.filter(keep) };
     let root = this.blocks === this.root ? blocks : { ...this.root, Blocks: blocks };
+    // the block metadata is the page's, not the renderer's: left out of the file it gets
+    if (root.Metadata?.BlockInfo) { const { BlockInfo, ...rest } = root.Metadata; root = { ...root, Metadata: rest }; void BlockInfo; }
+    if (root.BlockInfo) { const { BlockInfo, ...rest } = root; root = rest; void BlockInfo; }
     if (!this.blocks.BlockEntities && this.root.TileEntities) root = { ...root, TileEntities: { ...this.root.TileEntities, v: this.root.TileEntities.v.filter(keep) } };
     const value = this.v3 ? { ...this.nbt.value, Schematic: root } : root;
     return gzip(encodeNbt({ name: this.nbt.name, value }));

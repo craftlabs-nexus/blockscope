@@ -24,27 +24,30 @@ is for), parts and paintings.
   CurseForge zip, or pick one in the File group. A plain resource-pack `.zip` dropped on the page goes on top.
 - **The file.** Layer slicing, the roof, walls and floor toggles, hiding parts, the sign text and the per-layer counts
   of the build animation are all worked out in the page from the file in memory (`src/schematic.js`), which also
-  renames framed drawers per material set so their composite models apply. A `.litematic`, `.schematic` or `.nbt` is
-  converted to a Sponge schematic by the renderer's WASM (Nucleation) first. A file opened or dropped from disk
-  brings its generator's metadata when its `<name>.meta.json` is opened or dropped with it (the parts, the shell,
-  what each block is for); a plan file opened by its address finds it beside itself.
+  renames framed drawers per material set so their composite models apply. A file is read by what it holds, not its
+  name: a Sponge `.schem` as it is; a `.litematic` and a structure `.nbt` are turned into one in the page
+  (`src/formats.js`; a Litematica file's regions are merged at their positions, a structure void or air never erasing
+  another region's block); anything else, an MCEdit `.schematic`, by the renderer's WASM (Nucleation). The parts, the
+  shell and what each block is for come from the generator's metadata: the file's own when it carries some (below),
+  else a `<name>.meta.json` (opened or dropped with a file from disk; a plan file opened by its address finds it
+  beside itself), else a Litematica file's regions as its parts. The Parts group's tooltip says which.
 - **The view.** View (fit to the fronts, perspective or isometric, Shot, Build, the shell toggles), Layers (all,
-  single, below, above, a slider), Parts (from the plan's metadata: hover to light one up, hide, solo, fly to it),
-  Block (click to pin: id, state, position, a sign's text, a painting, the metadata), Redstone (signal digits:
-  [Redstone Tweaks](https://modrinth.com/resourcepack/redstonetweaksresourcepack), MIT, fetched from Modrinth once and
-  added on top of the pack, showing dust strength, repeater delays and comparator modes; `?sim=on`: the renderer's
-  simulator), File (open, copy link, the pack). Hover shows a tooltip. The link follows the view: the file, the
-  shell, the hidden parts, the layer and the camera; it can name only a file opened by its address, so Copy link is
-  dimmed for a file from disk. Build downloads an animated GIF of the build going up a layer at a time. A resource
-  pack dropped on the page, like Redstone Tweaks, goes above the built pack and wins over it. `?` lists the mouse and
-  keyboard controls.
+  single, below, above, a slider), Parts (from the metadata or a Litematica file's regions: hover to light one up,
+  hide, solo, fly to it), Block (click to pin: id, state, position, a sign's text, a painting, the metadata), Redstone
+  (signal digits: [Redstone Tweaks](https://modrinth.com/resourcepack/redstonetweaksresourcepack), MIT, fetched from
+  Modrinth once and added on top of the pack, showing dust strength, repeater delays and comparator modes; `?sim=on`:
+  the renderer's simulator), File (open, copy link, the pack). Hover shows a tooltip. The link follows the view: the
+  file, the shell, the hidden parts, the layer and the camera; it can name only a file opened by its address, so Copy
+  link is dimmed for a file from disk. Build downloads an animated GIF of the build going up a layer at a time. A
+  resource pack dropped on the page, like Redstone Tweaks, goes above the built pack and wins over it. `?` lists the
+  mouse and keyboard controls.
 
 ## Running it
 
 ```bash
 npm install
 npm run dev        # http://localhost:5180
-npm test           # the NBT codec and the schematic preparation (node --test)
+npm test           # the NBT codec, the formats and the schematic preparation (node --test)
 npm run build      # the static site in dist/
 ```
 
@@ -69,6 +72,25 @@ the folder that holds this one. Without it, open or drop a file.
 Build settings: `VITE_PLANS_BASE`, `VITE_ALLOWED_ORIGINS` (comma separated), `VITE_DEFAULT_PLAN` (the file opened
 without `?schem=`; the hall in development, none in a build unless set).
 
+## Block metadata in the file
+
+A schematic may carry its generator's metadata, so it needs no file beside it: a `BlockInfo` compound in a Sponge
+file's `Metadata` (the format's place for an application's data), or at the root of a Litematica or structure file
+(the game and Litematica ignore it). Version 1:
+
+| Key | Type | Meaning |
+|---|---|---|
+| `Version` | int | 1 |
+| `Origin` | int array | the world position of the file's cell 0, 0, 0 (x, y, z); a `.litematic` or `.nbt` takes it as its offset, so a cell has one position in every format |
+| `Size` | int array | the box `Cells` counts in: width, height, length |
+| `Records` | list of compounds | the distinct entries, each a compound of strings and lists of strings: `owner`, `role`, `item`, `part`, `shell` (roof, wall, floor), `ids`, ... |
+| `Cells` | int array | one int per cell of the box, in the order (y × length + z) × width + x: 0 for a cell without an entry, else 1 + its index in `Records` |
+
+`part` names the part a block belongs to (else the `owner` before its first `:`), `shell` the shell part, and every
+field is shown when the block is clicked. The CraftLabs storage plan's writer (`storage-plan/schemlib.mjs` in its
+server repository) writes it into all three formats; the storage hall's 4,538 cells take 1,188 records, about 48 KB
+of the file gzipped. The page leaves it out of the file the renderer gets.
+
 ## Deploying (Cloudflare Workers, static assets)
 
 The site is static: a Worker with static assets and no script (`wrangler.jsonc`, `assets.directory` `./dist`).
@@ -85,6 +107,7 @@ read (`VITE_PLANS_BASE`, `VITE_DEFAULT_PLAN`), the site opens empty and takes a 
 |---|---|
 | `index.html`, `src/main.js` | the page |
 | `src/schematic.js`, `src/nbt.js` | the schematic in memory: NBT in the browser, info, shell, parts, signs, layer counts, the file the renderer gets |
+| `src/formats.js` | Litematica and structure files turned into Sponge ones, and the block metadata a file carries |
 | `src/parts.js`, `src/framed.js` | the plan's parts and shell from its metadata; framed drawers' ids per material set |
 | `src/plans.js` | plan files: the schematic, its metadata and paintings |
 | `src/paintings.js`, `src/buildgif.js` | the paintings overlay; the build animation's framing and GIF encoding |

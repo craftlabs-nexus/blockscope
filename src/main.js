@@ -15,7 +15,7 @@ import { defaultSource, droppedSource } from "./pack/sources.js";
 import { REDSTONE_TWEAKS, extraPackBlob } from "./pack/extras.js";
 import { tidyRendererPacks, switchPack, keepBaseLowest, packManager } from "./pack/packs.js";
 import { clear as clearStore, usage } from "./pack/store.js";
-import { resolvePlan, loadPlan, DEFAULT_PLAN, SCHEMATIC_EXT } from "./plans.js";
+import { resolvePlan, loadPlan, optionalJson, DEFAULT_PLAN, SCHEMATIC_EXT } from "./plans.js";
 
 const $ = (id) => document.getElementById(id);
 // Anything that breaks the page shows in the status line, not only in the console.
@@ -29,8 +29,10 @@ const SCHEM_ID = "blockscope";   // the renderer's name for the loaded file (one
 
 // ---- the loaded file ------------------------------------------------------------------------------------------------
 // file: { name, url (a plan file's; null for one opened from disk), param (what ?schem= says), schem (Schematic),
-// meta, paintings, paintingsBase }. info: its size, offset, roof, shell counts and parts, as the panel reads them.
-let file = null, meta = null;
+// meta (a .meta.json's), paintings, paintingsBase }. info: its size, offset, roof, shell counts and parts, as the
+// panel reads them. meta: the metadata in use, the file's own (BlockInfo) first, then a .meta.json, then a Litematica
+// file's regions as parts; metaFrom says which, in words.
+let file = null, meta = null, metaFrom = "";
 let schemName = "";
 const ROOF_HIDE_COVER = 0.6;
 const info = { width: 0, height: 0, length: 0, offset: [0, 0, 0], shell: { roof: 0, wall: 0, floor: 0 }, roofCover: 0, parts: [] };
@@ -66,7 +68,11 @@ const signAt = new Map(), paintingAt = new Map();
 
 /** Makes `f` the loaded file: reads its info, shell and parts and resets the controls (the URL's on the first load). */
 function setFile(f, { fromUrl = false } = {}) {
-  file = f; meta = f.meta; schemName = f.name;
+  file = f; schemName = f.name;
+  const own = f.schem.metaSource === "file" ? f.schem.meta : null;
+  meta = own ?? f.meta ?? f.schem.meta ?? null;
+  metaFrom = own ? "the file's own metadata" : f.meta ? `${f.name.replace(/\.[^.]+$/, "")}.meta.json` : f.schem.metaSource === "regions" ? "the Litematica file's regions" : "";
+  $("partsGrp").querySelector("summary").title = `The file's parts, from ${metaFrom || "its metadata"}: hover to light one up, click the eye to hide it, solo to see it alone, click the name to fly to it`;
   $("schemName").textContent = schemName; $("schemName").title = f.url ? f.url.href : `${schemName} (opened from disk; stays in this page)`;
   document.title = `${schemName} · Blockscope`;
   // a link can bring back only a file that was opened from a link (?schem=), not one from disk; dimmed (not disabled,
@@ -104,7 +110,13 @@ function setFile(f, { fromUrl = false } = {}) {
   applyLayers(); showShellState(); renderParts(); showBlock(null);
 }
 /** Reads a schematic file's bytes into the page's file record. */
-async function readFile(rec) { status(`reading ${rec.name}…`, "busy"); return { ...rec, schem: await Schematic.load(rec.bytes, rec.name) }; }
+async function readFile(rec) {
+  status(`reading ${rec.name}…`, "busy");
+  const schem = await Schematic.load(rec.bytes, rec.name);
+  // a plan file's .meta.json beside it, fetched only for a file that carries no metadata of its own
+  if (!rec.meta && rec.metaUrl && schem.metaSource !== "file") rec = { ...rec, meta: await optionalJson(rec.metaUrl) };
+  return { ...rec, schem };
+}
 
 // The renderer builds block (x, y, z) of the file as a cube centered at local (x, y, z) (its edges fall on half
 // integers), and places the schematic group so the *loaded* blocks' tight bounds are centered on the world origin.
@@ -966,8 +978,8 @@ $("buildGif").onclick = () => captureBuild();
 
 // ---- opening files --------------------------------------------------------------------------------------------------
 // A schematic opened or dropped stays in the page (nothing is uploaded); the link then names no file, since a reload
-// cannot bring it back. Its generator's metadata (<name>.meta.json: parts, shell, owner, role, item) comes along when
-// it is opened or dropped together with it. A resource-pack zip goes on top of the merged pack; a modpack (a folder,
+// cannot bring it back. Its generator's metadata (parts, shell, owner, role, item) is read from the file itself when
+// it carries some (BlockInfo); else from its <name>.meta.json, opened or dropped together with it. A resource-pack zip goes on top of the merged pack; a modpack (a folder,
 // an .mrpack, a CurseForge or mods zip) becomes the source of the mod jars.
 async function openLocal(f, metaFile = null) {
   let meta = null;
