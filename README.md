@@ -115,6 +115,7 @@ done. `package.json` is untouched: `npm run dev`, `npm run build` and the deploy
 | `?cam=px,py,pz,tx,ty,tz` | the camera and its pivot, world coordinates |
 | `?at=x,y,z` | the block pinned in the Block panel, world coordinates (the address bar follows the pin; Copy in the Block panel, or <kbd>C</kbd>, copies it with this link) |
 | `?focus=x,y,z`, `?focus=<part>` | the camera flies to that block (world coordinates; it is pinned) or part once the file is drawn |
+| `?schem=https://files.craftlabs.nexus/<name>` | a shared file (`npm run share`, below) |
 | `?agent=1` | development only: the pack is downloaded without the consent prompt, for agents (`AGENTS.md`) |
 | `?sim=on` | the redstone simulator |
 | `?pick=off` | no block picking (the renderer's) |
@@ -172,6 +173,22 @@ then `npx wrangler dev` (or `npx wrangler deploy --dry-run`). The site's own pla
 (served at `/plans/`): the Gull Rock lighthouse, `gull-rock.schem` with its paintings, copied from the storage plan,
 which the site opens by default (`.env.production`); `?schem=` opens any other file there or on an allowed origin.
 
+## Sharing a file
+
+Schematics to share live outside this repository, in the R2 bucket `blockscope-files` behind
+`https://files.craftlabs.nexus` (an allowed origin; the bucket's CORS rules are `scripts/r2-cors.json`):
+
+```bash
+npm run share -- C:\path	o\design.litematic   # uploads it with design.schem (and design.meta.json) beside it
+npm run share -- --delete design                 # takes every format of it down
+```
+
+It prints the link to send, `https://blockscope.craftlabs.nexus/?schem=https://files.craftlabs.nexus/design.schem`.
+The page's File group has a Download row for a file opened by its address: the file, and the same design's
+`.schem`, `.litematic` or `.nbt` beside it. The script needs wrangler signed in to the Cloudflare account
+(`npx wrangler login`, or run it where wrangler already is, such as WSL: `node scripts/share.mjs <file>`); `--dir`
+puts files under a folder, `--only` leaves the other formats out.
+
 ## Files
 
 | File | Purpose |
@@ -186,6 +203,7 @@ which the site opens by default (`.env.production`); `?schem=` opens any other f
 | `src/pack/` | the pack: sources (packwiz or a dropped pack), the Mojang client jar, the build and the generated models, the page's IndexedDB, the renderer's stored packs |
 | `vite.config.mjs` | the dev server (the plans route, cross-origin isolation headers, the checkouts with `BLOCKSCOPE_LINK`) |
 | `scripts/dev-local.mjs` | `npm run dev:local`: the renderer's watch build and the dev server against the checkouts beside this one |
+| `scripts/share.mjs`, `scripts/r2-cors.json` | `npm run share`: a schematic up to (or down from) the files bucket, and the bucket's CORS rules |
 | `public/_headers` | the same headers for Cloudflare Pages |
 | `public/plans/`, `.env.production` | the site's own plan files (the Gull Rock lighthouse and its paintings) and the file it opens by default |
 

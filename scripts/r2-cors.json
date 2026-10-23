@@ -1,0 +1,19 @@
+{
+  "rules": [
+    {
+      "allowed": {
+        "origins": [
+          "https://blockscope.craftlabs.nexus",
+          "http://localhost:5180",
+          "http://localhost:5181",
+          "http://127.0.0.1:8787",
+          "http://localhost:8787"
+        ],
+        "methods": ["GET", "HEAD"],
+        "headers": ["*"]
+      },
+      "exposeHeaders": ["Content-Length", "Content-Type", "ETag", "Last-Modified"],
+      "maxAgeSeconds": 86400
+    }
+  ]
+}
