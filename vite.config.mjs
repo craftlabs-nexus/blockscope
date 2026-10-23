@@ -62,6 +62,10 @@ function linkedLibs(env) {
       dedupe: ["three", "nucleation"],
     },
     fsAllow: [searchForWorkspaceRoot(HERE), renderer, packrat],
+    // Its own pre-bundled dependencies (Packrat's zod and smol-toml from its checkout, not the published Packrat):
+    // sharing node_modules/.vite with `npm run dev` let either one rewrite the other's, and the page then asked for
+    // files the cache no longer had (504) and never started.
+    cacheDir: path.join(HERE, "node_modules", ".vite-linked"),
   };
 }
 
@@ -71,7 +75,7 @@ export default defineConfig(({ mode }) => {
   const linked = linkedLibs(env);
   return {
     plugins: [servePlans(plans)],
-    ...(linked && { resolve: linked.resolve }),
+    ...(linked && { resolve: linked.resolve, cacheDir: linked.cacheDir }),
     // One three.js for the page's meshes and the renderer's scene, and the renderer's WASM where it expects it:
     // pre-bundling would move the renderer into .vite/deps, where its import.meta.url-relative nucleation_bg.wasm
     // does not exist.
