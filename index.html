@@ -186,7 +186,7 @@
 
     /* Pack progress: a bar and a line under the status while the pack is built */
     #packRow { flex: none; display: flex; flex-direction: column; gap: 3px; padding: 4px 10px 6px; border-top: 1px solid var(--line-soft); }
-    #packRow[hidden] { display: none; }
+    #packRow[hidden], #grid[hidden] { display: none; }
     #packBar { width: 100%; height: 6px; accent-color: var(--accent); }
     #packText { font-size: 11px; color: var(--fg-key); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .packbar { margin-top: 6px; }
@@ -244,6 +244,7 @@
           <span class="seg" role="group" aria-label="camera">
             <button id="persp" aria-pressed="true" title="Perspective camera (P)">Persp</button>
             <button id="iso" aria-pressed="false" title="Isometric camera (I)">Iso</button>
+            <button id="top" aria-pressed="false" title="Top view (T): flat, straight down, every block the same size; drag pans, Q / E turn it a quarter, N puts north up">Top</button>
           </span>
           <span class="sp"></span>
           <button id="shot" title="Download a 1600×1000 render as a PNG">Shot</button>
@@ -254,6 +255,7 @@
             <button id="shell-wall" class="toggle" aria-pressed="true" title="Show or hide the walls">Walls</button>
             <button id="shell-floor" class="toggle" aria-pressed="true" title="Show or hide the floor">Floor</button>
           </span>
+          <button id="grid" class="toggle" aria-pressed="true" hidden title="Block grid over the top view (G)">Grid</button>
         </div>
       </details>
       <details class="grp" id="layersGrp" open>
@@ -382,7 +384,9 @@
       <dt><kbd>Space</kbd> / <kbd>Shift</kbd></dt><dd>up / down</dd>
       <dt><kbd>F</kbd></dt><dd>fit the schematic</dd>
       <dt><kbd>N</kbd></dt><dd>look north</dd>
-      <dt><kbd>P</kbd> <kbd>I</kbd></dt><dd>perspective, isometric</dd>
+      <dt><kbd>P</kbd> <kbd>I</kbd> <kbd>T</kbd></dt><dd>perspective, isometric, top (flat, from above)</dd>
+      <dt><kbd>Q</kbd> / <kbd>E</kbd> in top</dt><dd>turn a quarter left / right (drag pans)</dd>
+      <dt><kbd>G</kbd></dt><dd>block grid in the top view</dd>
       <dt><kbd>R</kbd></dt><dd>roof on / off</dd>
       <dt><kbd>1</kbd>–<kbd>4</kbd></dt><dd>layers: all, single, below, above</dd>
       <dt><kbd>PgUp</kbd> <kbd>PgDn</kbd> or <kbd>[</kbd> <kbd>]</kbd></dt><dd>step a layer</dd>

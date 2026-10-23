@@ -36,7 +36,8 @@ one for the Roof toggle and one for Inspect.
   shell and what each block is for come from the generator's metadata: the file's own when it carries some (below),
   else a `<name>.meta.json` (opened or dropped with a file from disk; a plan file opened by its address finds it
   beside itself), else a Litematica file's regions as its parts. The Parts group's tooltip says which.
-- **The view.** View (fit to the fronts, perspective or isometric, Shot, Build, the shell toggles), Layers (all,
+- **The view.** View (fit to the fronts, perspective, isometric or top: a flat plan straight down, every block the
+  same size, drag pans, Q / E turn it a quarter, a block grid; Shot, Build, the shell toggles), Layers (all,
   single, below, above, a slider), Parts (from the metadata or a Litematica file's regions: hover to light one up,
   hide, solo, fly to it), Block (click to pin: id, state, position, a sign's text, a painting, the metadata), Redstone
   (signal digits: [Redstone Tweaks](https://modrinth.com/resourcepack/redstonetweaksresourcepack), MIT, fetched from

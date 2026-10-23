@@ -103,6 +103,9 @@ function setFile(f, { fromUrl = false } = {}) {
     if (ul) { layer.mode = ul[1]; layer.cur = Number(ul[2]); }
     const c = (params.get("cam") ?? "").split(",").map(Number);
     if (c.length === 6 && c.every(Number.isFinite)) { savedView.on = true; savedView.pos.set(c[0], c[1], c[2]); savedView.target.set(c[3], c[4], c[5]); savedView.quat.setFromRotationMatrix(new THREE.Matrix4().lookAt(savedView.pos, savedView.target, new THREE.Vector3(0, 1, 0))); userMoved = true; }
+    // ?view=top,<quarter>,<zoom>: the top view, entered once the file is drawn
+    const vt = (params.get("view") ?? "").match(/^top(?:,([0-3]))?(?:,(\d*\.?\d+))?$/);
+    topView.wanted = vt ? { q: Number(vt[1] ?? 0), zoom: vt[2] ? Number(vt[2]) : undefined } : null;
     // ?minY=M&maxY=N (N exclusive, negative from the top) opens with only those file layers
     const minY = params.get("minY"), maxY = params.get("maxY");
     if (!ul && (minY !== null || maxY !== null)) {
@@ -134,6 +137,11 @@ function pinGroup() {
 const layer = { mode: "all", cur: 0, lo: 0, hi: 0 }; // modes: all (the roof toggle applies), single, below, above
 // the build animation (captureBuild) while it runs; `after` is its result line, shown once the view from before is back
 const capture = { on: false, stop: false, rendered: null, after: null };
+// The top view (enterTop): on, the quarter the top of the screen faces (0 north, 1 east, 2 south, 3 west), the heading
+// as drawn (radians, unbounded, so a turn animates the short way), the turn in flight, the camera to go back to, the
+// orbit settings it replaced, whether the block grid shows, and what a link asked for on the first load.
+const topView = { on: false, q: 0, heading: 0, anim: null, prev: "perspective", saved: null, grid: true, wanted: null };
+try { topView.grid = localStorage.getItem("top.grid") !== "0"; } catch {}
 const simOn = params.get("sim") === "on";
 /** The file as the renderer gets it now: the layer range, the hidden shell and parts as air. */
 function renderBytes() {
@@ -398,6 +406,9 @@ async function startRenderer() {
           if (savedView.on) restoreSoon();
           else if (!userMoved) smartFit();
           if (layer.mode === "above" && layer.wantBottomUp) { layer.wantBottomUp = false; lookFromBelow(); }
+          if (topView.wanted) { const w = topView.wanted; topView.wanted = null; enterTop({ q: w.q, zoom: w.zoom, target: savedView.on ? savedView.target : null }); }
+          else if (topView.on) placeTop();   // the group's height follows the layers drawn: back above it
+          updateGrid();
           syncUrl();
           readPackReport();
           showRedstoneTweaks();
@@ -483,6 +494,7 @@ function centerOnDrawn() {
 }
 // the library's fit, then the fronts; again after the library's own deferred refit, unless the user has moved since
 function smartFit() {
+  if (topView.on) { topFit(); setTimeout(() => { if (!userMoved && topView.on) topFit(); }, 150); return; }
   try { renderer?.cameraManager.focusOnSchematics(); } catch {}
   centerOnDrawn(); faceFronts();
   for (const t of [150, 600]) setTimeout(() => { if (!userMoved) { centerOnDrawn(); faceFronts(); } }, t);
@@ -535,7 +547,7 @@ function repivot() {
 // a left drag into a pan as OrbitControls would: its pointerdown sees Shift as up. Ctrl+drag and middle drag pan.
 let pointerHeld = 0;
 canvas.addEventListener("pointerdown", (ev) => {
-  pointerHeld++; cancelRestores(); try { renderer?.cameraManager.stopAnimation(); } catch {} if (ev.button === 0) repivot(); userMoved = true;
+  pointerHeld++; cancelRestores(); try { renderer?.cameraManager.stopAnimation(); } catch {} if (ev.button === 0 && !topView.on) repivot(); userMoved = true;
   // any button hides the hover tooltip (the right-drag look below swallows its moves, so the hover handler never would)
   hideTip(); hoverPending = null;
   if (ev.shiftKey) Object.defineProperty(ev, "shiftKey", { value: false }); // the same event object reaches OrbitControls
@@ -548,7 +560,7 @@ for (const t of ["pointerup", "pointercancel"]) canvas.addEventListener(t, () =>
 const look = { on: false, x: 0, y: 0 };
 canvas.addEventListener("contextmenu", (ev) => ev.preventDefault());
 canvas.addEventListener("pointerdown", (ev) => {
-  if (ev.button !== 2) return;
+  if (ev.button !== 2 || topView.on) return;   // the top view never tilts: there a right drag pans
   look.on = true; look.x = ev.clientX; look.y = ev.clientY; userMoved = true;
   try { canvas.setPointerCapture(ev.pointerId); } catch {}
   ev.stopImmediatePropagation(); ev.preventDefault();
@@ -569,33 +581,56 @@ for (const t of ["pointerup", "pointercancel"]) canvas.addEventListener(t, (ev) 
 function tuneControls() {
   const ctl = controls(); if (!ctl) return;
   ctl.zoomToCursor = true;
-  if (ctl.mouseButtons) { ctl.mouseButtons.RIGHT = -1; ctl.mouseButtons.MIDDLE = THREE.MOUSE.PAN; } // right looks around, middle pans
   ctl.enablePan = true;
+  if (topView.on) {   // the top view: every button pans, one finger pans, nothing turns
+    ctl.enableRotate = false;
+    if (ctl.mouseButtons) Object.assign(ctl.mouseButtons, { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN });
+    if (ctl.touches) ctl.touches.ONE = THREE.TOUCH.PAN;
+    return;
+  }
+  if (ctl.mouseButtons) { ctl.mouseButtons.RIGHT = -1; ctl.mouseButtons.MIDDLE = THREE.MOUSE.PAN; } // right looks around, middle pans
 }
 canvas.addEventListener("wheel", () => { userMoved = true; cancelRestores(); }, { passive: true });
 canvas.addEventListener("dblclick", (ev) => {
   const hit = hitUnderPointer(...ndcOf(ev));
-  const ctl = controls(); if (hit && ctl?.target) { ctl.target.copy(hit.point); ctl.update?.(); userMoved = true; }
+  const ctl = controls(); if (!hit || !ctl?.target) return;
+  userMoved = true;
+  if (topView.on) { ctl.target.x = hit.point.x; ctl.target.z = hit.point.z; placeTop(); return; }   // centers that block
+  ctl.target.copy(hit.point); ctl.update?.();
 });
 // Look north: keep the distance and height to the pivot, stand south of it.
 function lookNorth() {
   stopMomentum();
+  if (topView.on) { turnTopTo(Math.round(topView.heading / (2 * Math.PI)) * 2 * Math.PI); return; }   // north up
   const ctl = controls(), cam = camera(); if (!ctl?.target || !cam) return;
   const off = cam.position.clone().sub(ctl.target); const flat = Math.hypot(off.x, off.z) || 1;
   cam.position.set(ctl.target.x, cam.position.y, ctl.target.z + flat); ctl.update?.(); userMoved = true; redraw();
 }
 $("compass").onclick = lookNorth;
+// "Forward" along the ground: the view direction flattened. Looking steeply down (or up) that shrinks to nothing and
+// its sign flips at the pole, so the screen's up direction, flattened, is added in: both point the same way on the
+// ground, and straight down forward is the top of the screen. Built with the camera's own Vector3 class.
+function groundForward(cam) {
+  const V = cam.position.constructor, d = new V(), u = new V(0, 1, 0).applyQuaternion(cam.quaternion);
+  cam.getWorldDirection(d);
+  const s = d.y < 0 ? 1 : -1; // looking up, the screen's top leans back over your head
+  const f = new V(d.x + s * u.x, 0, d.z + s * u.z);
+  if (f.lengthSq() < 1e-9) f.set(0, 0, -1);
+  return f.normalize();
+}
 // Compass: the rose turns with the camera's heading (north is -z in the file, as in the game). The same frame loop
 // notices a moved camera and writes it to the link after a pause.
 let camStamp = "";
 requestAnimationFrame(function compass() {
   requestAnimationFrame(compass);
   const cam = camera(); if (!cam) return;
-  const d = new THREE.Vector3(); cam.getWorldDirection(d);
+  stepTopTurn(); fadeGrid();
+  const d = groundForward(cam);
   const heading = Math.atan2(d.x, -d.z); // 0 = looking north
   if (!Number.isFinite(heading)) return; // the camera has no direction yet while the renderer sets up
   $("compassRose").setAttribute("transform", `rotate(${(-heading * 180) / Math.PI})`);
-  const stamp = camText(); if (stamp && stamp !== camStamp) { camStamp = stamp; if (userMoved) syncUrl(); }
+  // the top view's zoom and quarter go in the link too (an orthographic zoom leaves the camera where it is)
+  const stamp = camText() + (topView.on ? `|${cam.zoom}|${topView.q}` : ""); if (stamp && stamp !== camStamp) { camStamp = stamp; if (userMoved) syncUrl(); }
 });
 // Hover: the block under the cursor gets an outline and a tooltip beside the pointer (none for touch); throttled to
 // animation frames. A press or drag with any button hides the tooltip until the pointer moves again with none held.
@@ -741,6 +776,8 @@ function flyToPart(name) {
   if (!cells.length) cells = cellsOfPart(name); if (!cells.length) return;
   const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
   for (const c of cells) for (let i = 0; i < 3; i++) { min[i] = Math.min(min[i], c[i]); max[i] = Math.max(max[i], c[i]); }
+  userMoved = true;
+  if (topView.on) { topFit(new THREE.Box3(g.localToWorld(new THREE.Vector3(...min).subScalar(0.5)), g.localToWorld(new THREE.Vector3(...max).addScalar(0.5)))); return; }
   const center = g.localToWorld(new THREE.Vector3((min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2));
   const size = Math.max(max[0] - min[0], max[1] - min[1], max[2] - min[2]) + 1;
   const dir = cam.position.clone().sub(ctl.target).normalize(); if (dir.lengthSq() < 1e-6) dir.set(0.5, 0.6, 0.6).normalize();
@@ -767,6 +804,8 @@ requestAnimationFrame(function captureLoop() { requestAnimationFrame(captureLoop
 function restoreView() {
   if (!savedView.on || pointerHeld) return;
   const cam = camera(), ctl = controls(); if (!cam || !ctl?.target) return;
+  // the top view keeps only where it looks on the ground: it stands above the drawn layers, which move with a reload
+  if (topView.on) { ctl.target.x = savedView.target.x; ctl.target.z = savedView.target.z; placeTop(); return; }
   cam.position.copy(savedView.pos); ctl.target.copy(savedView.target); cam.quaternion.copy(savedView.quat); ctl.update?.(); redraw();
 }
 // now, and again after the renderer's own deferred fit
@@ -819,7 +858,7 @@ $("layerUp").onclick = () => stepLayer(1);
   sl.onchange = go;
 }
 function lookFromBelow() {
-  const ctl = controls(), cam = camera(); if (!ctl?.target || !cam) return;
+  const ctl = controls(), cam = camera(); if (!ctl?.target || !cam || topView.on) return;
   const t = ctl.target.clone(); const d = cam.position.distanceTo(t);
   cam.position.set(t.x, t.y - d * 0.8, t.z + d * 0.6); ctl.update?.();
 }
@@ -880,15 +919,133 @@ $("simRun").onclick = () => {
 // Camera presets as a segmented pair, the active one pressed.
 const BG = 0x1a1d22;
 const keepBackground = () => { const sc = renderer?.sceneManager?.scene; if (sc) sc.background = new THREE.Color(BG); try { renderer?.renderManager?.renderer?.setClearColor(BG, 1); } catch {} redraw(); };
+let camPreset = "perspective";   // the renderer's camera: perspective or isometric (the top view uses the isometric one)
+function showCamButtons() {
+  $("persp").setAttribute("aria-pressed", String(!topView.on && camPreset === "perspective"));
+  $("iso").setAttribute("aria-pressed", String(!topView.on && camPreset === "isometric"));
+  $("top").setAttribute("aria-pressed", String(topView.on));
+  $("grid").hidden = !topView.on; $("grid").setAttribute("aria-pressed", String(topView.grid));
+}
 const setCamera = (preset) => {
   stopMomentum();
-  renderer?.cameraManager.switchCameraPreset(preset);
+  leaveTop();
+  renderer?.cameraManager.switchCameraPreset(preset); camPreset = preset;
   keepBackground(); setTimeout(keepBackground, 50); setTimeout(keepBackground, 400);
   setTimeout(tuneControls, 0);
-  $("iso").setAttribute("aria-pressed", String(preset === "isometric")); $("persp").setAttribute("aria-pressed", String(preset === "perspective"));
+  showCamButtons(); syncUrl();
 };
 $("iso").onclick = () => setCamera("isometric");
 $("persp").onclick = () => setCamera("perspective");
+$("top").onclick = () => toggleTop();
+
+// The top view: a plan of the drawn layers, straight down through the renderer's isometric camera, which is
+// orthographic, so every block is the same size wherever it is on screen. Three's OrbitControls still pan and zoom
+// (zoom toward the cursor), but turning is off and their polar and distance limits are opened so the camera may sit at
+// the pole. The camera stands a hair off the vertical, toward the bottom of the screen: three's lookAt needs that
+// sliver to know which way the screen's top faces, so it is what holds the compass direction (Q / E turn it a
+// quarter, N puts north up). Meanwhile the renderer's refit on every load is off (preserveCameraOnUpdate), so a layer
+// change keeps the plan where it was; the camera is put back above the drawn blocks instead, as their height moves.
+const QUARTER = Math.PI / 2;
+function enterTop({ q, zoom, target } = {}) {
+  const cm = renderer?.cameraManager; if (!cm || topView.on) return;
+  stopMomentum(); cancelRestores();
+  // the plan faces the way the view did, to the nearest quarter
+  if (q === undefined) { const cur = camera(), f = cur ? groundForward(cur) : null; q = f ? ((Math.round(Math.atan2(f.x, -f.z) / QUARTER) % 4) + 4) % 4 : 0; }
+  topView.prev = camPreset;
+  if (camPreset !== "isometric") { cm.switchCameraPreset("isometric"); camPreset = "isometric"; }
+  const ctl = controls(), cam = camera(); if (!ctl?.target || !cam) return;
+  topView.saved = { minPolarAngle: ctl.minPolarAngle, maxPolarAngle: ctl.maxPolarAngle, minDistance: ctl.minDistance, maxDistance: ctl.maxDistance,
+    enableRotate: ctl.enableRotate, buttons: { ...ctl.mouseButtons }, one: ctl.touches?.ONE, far: cam.far };
+  Object.assign(ctl, { minPolarAngle: 0, maxPolarAngle: Math.PI, minDistance: 0, maxDistance: Infinity });
+  cm.cameraOptions.preserveCameraOnUpdate = true;
+  Object.assign(topView, { on: true, q, heading: q * QUARTER, anim: null });
+  tuneControls();
+  if (target) { ctl.target.copy(target); if (zoom > 0) cam.zoom = zoom; placeTop(); } else topFit();
+  userMoved = true;
+  keepBackground(); setTimeout(keepBackground, 50);
+  updateGrid(); showCamButtons(); syncUrl();
+}
+function leaveTop() {
+  if (!topView.on) return;
+  const ctl = controls(), cam = camera(), s = topView.saved;
+  Object.assign(topView, { on: false, anim: null });
+  if (renderer) renderer.cameraManager.cameraOptions.preserveCameraOnUpdate = false;
+  if (ctl && s) {
+    Object.assign(ctl, { minPolarAngle: s.minPolarAngle, maxPolarAngle: s.maxPolarAngle, minDistance: s.minDistance, maxDistance: s.maxDistance, enableRotate: s.enableRotate });
+    if (ctl.mouseButtons) Object.assign(ctl.mouseButtons, s.buttons);
+    if (ctl.touches && s.one !== undefined) ctl.touches.ONE = s.one;
+  }
+  // the renderer's isometric fit sizes the frustum for no zoom
+  if (cam) { if (s) cam.far = s.far; cam.zoom = 1; cam.updateProjectionMatrix(); }
+  updateGrid();
+}
+const toggleTop = () => { if (topView.on) setCamera(topView.prev); else enterTop(); };
+// Stands the camera above the pivot, over the top of the whole file (so no layer is ever behind it), facing the heading.
+function placeTop() {
+  const cam = camera(), ctl = controls(), g = group(); if (!cam || !ctl?.target || !topView.on) return;
+  const topY = g ? g.localToWorld(new THREE.Vector3(0, info.height + 0.5, 0)).y : ctl.target.y;
+  const H = Math.max(40, info.height + 40), off = H * 1e-4;
+  const fx = Math.sin(topView.heading), fz = -Math.cos(topView.heading);   // the screen's top, on the ground
+  ctl.target.y = topY;
+  cam.position.set(ctl.target.x - fx * off, topY + H, ctl.target.z - fz * off);
+  cam.far = Math.max(topView.saved?.far ?? 1000, H + info.height + 50); cam.updateProjectionMatrix();
+  cam.lookAt(ctl.target); ctl.update?.(); redraw();
+}
+// Centers the plan on `box` (world; the drawn blocks by default) and zooms so its footprint fills the view.
+function topFit(box = null) {
+  const cam = camera(), ctl = controls(); if (!cam || !ctl?.target || !topView.on) return;
+  if (!box) { box = new THREE.Box3(); for (const m of schematicMeshes()) box.expandByObject(m); }
+  if (!box.isEmpty()) {
+    const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3());
+    const odd = topView.q % 2 === 1;   // east or west up: the file's x runs up the screen
+    const w = Math.max(1, odd ? s.z : s.x), h = Math.max(1, odd ? s.x : s.z);
+    ctl.target.x = c.x; ctl.target.z = c.z;
+    cam.zoom = Math.min((cam.right - cam.left) / (w * 1.1), (cam.top - cam.bottom) / (h * 1.1));
+  }
+  placeTop();
+}
+// A turn: the heading eases to `to` over a fifth of a second (the compass loop steps it).
+function turnTopTo(to) {
+  if (!topView.on) return;
+  topView.q = ((Math.round(to / QUARTER) % 4) + 4) % 4;
+  topView.anim = { from: topView.heading, to, t0: performance.now() };
+  userMoved = true;
+}
+const turnTop = (d) => turnTopTo((topView.anim?.to ?? topView.heading) + d * QUARTER);
+function stepTopTurn() {
+  const a = topView.anim; if (!a || !topView.on) return;
+  const t = Math.min(1, (performance.now() - a.t0) / 200), e = t * t * (3 - 2 * t);
+  topView.heading = a.from + (a.to - a.from) * e;
+  if (t === 1) topView.anim = null;
+  placeTop();
+}
+// The block grid: lines on the block edges over the file's footprint, just above the top layer drawn, always in front
+// (seen straight down an orthographic camera, lines at any height fall on the edges of every layer). In the marks
+// group, so the renderer's reload strips it (rebuilt after every render) and the build animation leaves it out. It
+// fades out when a block is under 6 pixels, where it would only grey the plan.
+const gridMat = new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.6, depthTest: false, depthWrite: false });
+let gridLines = null;
+function updateGrid() {
+  if (gridLines) { gridLines.parent?.remove(gridLines); gridLines.geometry.dispose(); gridLines = null; }
+  if (topView.on && topView.grid && info.width && group()) {
+    attachMarks();
+    const y = shownRange()[1] + 0.52, w = info.width, l = info.length, pts = [];
+    for (let x = 0; x <= w; x++) pts.push(x - 0.5, y, -0.5, x - 0.5, y, l - 0.5);
+    for (let z = 0; z <= l; z++) pts.push(-0.5, y, z - 0.5, w - 0.5, y, z - 0.5);
+    const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
+    gridLines = new THREE.LineSegments(geo, gridMat); gridLines.renderOrder = 8; gridLines.raycast = () => {};
+    markGroup.add(gridLines); fadeGrid(true);
+  }
+  redraw();
+}
+function fadeGrid(force = false) {
+  const cam = camera(); if (!gridLines || !cam?.isOrthographicCamera) return;
+  const px = (canvas.clientHeight * cam.zoom) / (cam.top - cam.bottom);   // pixels per block
+  const show = px >= 6;
+  if (force || gridLines.visible !== show) { gridLines.visible = show; redraw(); }
+}
+const setGrid = (on) => { topView.grid = on; try { localStorage.setItem("top.grid", on ? "1" : "0"); } catch {} updateGrid(); showCamButtons(); };
+$("grid").onclick = () => setGrid(!topView.grid);
 // The panel collapses to its header (file name, status, compass) with the arrow or H; each group folds on its own;
 // both are remembered in this browser. The Redstone group opens when the page runs the simulator.
 const hud = $("hud"), hudToggle = $("hudToggle");
@@ -1076,6 +1233,7 @@ function syncUrl(now = false) {
     if (solo) q.set("part", solo); else if (hiddenPartSet.size) q.set("hidePart", [...hiddenPartSet].join(","));
     if (layer.mode !== "all") q.set("layer", `${layer.mode},${layer.cur}`); else q.delete("layer");
     const c = userMoved ? camText() : ""; if (c) q.set("cam", c); else q.delete("cam");
+    if (topView.on) q.set("view", `top,${topView.q},${Math.round((camera()?.zoom ?? 1) * 1000) / 1000}`); else q.delete("view");
     const s = u.toString(); if (s !== location.href) history.replaceState(null, "", s);
   };
   if (now) write(); else urlTimer = setTimeout(write, 400);
@@ -1086,7 +1244,8 @@ $("copyLink").onclick = async () => {
   try { await navigator.clipboard.writeText(location.href); status("link copied"); }
   catch { status("could not copy; the address bar has the link", "err"); }
 };
-// Keyboard shortcuts (the tooltips name them): F fit, N north, P / I camera, R roof, 1-4 layer modes, PgUp / PgDn and
+// Keyboard shortcuts (the tooltips name them): F fit, N north, P / I / T camera (Q / E turn the top view, G its grid),
+// R roof, 1-4 layer modes, PgUp / PgDn and
 // [ ] step a layer, Esc unpins or closes help, H folds the panel, ? opens help. Nothing fires while typing in a box.
 addEventListener("keydown", (ev) => {
   if (typing(ev) || ev.ctrlKey || ev.metaKey || ev.altKey) return;
@@ -1102,6 +1261,9 @@ addEventListener("keydown", (ev) => {
   else if (k === "n" || k === "N") lookNorth();
   else if (k === "p" || k === "P") setCamera("perspective");
   else if (k === "i" || k === "I") setCamera("isometric");
+  else if (k === "t" || k === "T") toggleTop();
+  else if (k === "g" || k === "G") setGrid(!topView.grid);
+  else if (topView.on && (k === "q" || k === "Q" || k === "e" || k === "E")) { if (!ev.repeat) turnTop(k === "e" || k === "E" ? 1 : -1); }
   else if (k === "r" || k === "R") { if (!$("shell-roof").disabled) $("shell-roof").click(); }
   else if (k === "1") setMode("all"); else if (k === "2") setMode("single"); else if (k === "3") setMode("below"); else if (k === "4") setMode("above");
   else if (k === "h" || k === "H") setCollapsed(!hud.classList.contains("collapsed"));
@@ -1126,15 +1288,19 @@ let flyLast = performance.now();
   const cm = renderer.cameraManager, cam = cm.activeCamera?._camera; if (!cam) return;
   const ctl = cm.controls instanceof Map ? cm.controls.get(cm.activeControlKey) : cm.controls?.[cm.activeControlKey];
   const V = cam.position.constructor;
-  const fwd = new V(); cam.getWorldDirection(fwd); fwd.y = 0; if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, -1); fwd.normalize();
+  const fwd = groundForward(cam);
   const right = new V().crossVectors(fwd, new V(0, 1, 0));
   const k = (c) => (keys.has(c) ? 1 : 0);
+  // the top view slides the plan (up and down mean nothing there; Q and E turn it), at a speed that suits the zoom:
+  // three fifths of the screen's height a second
+  const top = topView.on && cam.isOrthographicCamera;
   const move = new V()
     .addScaledVector(fwd, k("KeyW") - k("KeyS"))
     .addScaledVector(right, k("KeyD") - k("KeyA"))
-    .add(new V(0, k("Space") + k("KeyE") - k("ShiftLeft") - k("ShiftRight") - k("KeyQ"), 0));
+    .add(new V(0, top ? 0 : k("Space") + k("KeyE") - k("ShiftLeft") - k("ShiftRight") - k("KeyQ"), 0));
   if (move.lengthSq() === 0) return;
-  move.normalize().multiplyScalar(window.flySpeed * dt);
+  const speed = top ? Math.max(4, (0.6 * (cam.top - cam.bottom)) / cam.zoom) : window.flySpeed;
+  move.normalize().multiplyScalar(speed * dt);
   cam.position.add(move);
   if (ctl?.target) { ctl.target.add(move); ctl.update?.(); }
   userMoved = true; noteInput();
