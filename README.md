@@ -172,22 +172,12 @@ cross-origin isolation headers, and a path that is no file answers 404. Check a 
 then `npx wrangler dev` (or `npx wrangler deploy --dry-run`). The site serves no plan files of its own: they are in
 the files bucket (below), its plans base, and it opens the Gull Rock lighthouse (`gull-rock.schem`) by default.
 
-## Publishing a file
+## Hosted designs
 
-The site's schematics live outside this repository, in the R2 bucket `blockscope-files` behind
-`https://files.craftlabs.nexus` (the site's plans base and an allowed origin; the bucket's CORS rules are
-`scripts/r2-cors.json`). The Gull Rock lighthouse, the site's default, is there too.
-
-```bash
-npm run share -- C:\plans\design.litematic   # uploads it with design.schem beside it (and .meta.json, .paintings.json and its images)
-npm run share -- --delete design              # takes every format of it down
-```
-
-It prints the link to send, `https://blockscope.craftlabs.nexus/?schem=design.schem`; a full URL
-(`?schem=https://files.craftlabs.nexus/design.schem`) opens the same file. The page's File group has a Download row for a file opened by its address: the file, and the same design's
-`.schem`, `.litematic` or `.nbt` beside it. The script needs wrangler signed in to the Cloudflare account
-(`npx wrangler login`, or run it where wrangler already is, such as WSL: `node scripts/share.mjs <file>`); `--dir`
-puts files under a folder, `--only` leaves the other formats out.
+The site reads its designs from `https://files.craftlabs.nexus` (its plans base, `VITE_PLANS_BASE` in
+`.env.production`, and an allowed origin). `?schem=farm_kelp` opens that design's `.schem`, else its `.litematic`,
+else its `.nbt`; the page's File group has a Download row for the formats there. The tooling that prepares and
+publishes them is not part of this repository.
 
 ## Files
 
@@ -203,7 +193,6 @@ puts files under a folder, `--only` leaves the other formats out.
 | `src/pack/` | the pack: sources (packwiz or a dropped pack), the Mojang client jar, the build and the generated models, the page's IndexedDB, the renderer's stored packs |
 | `vite.config.mjs` | the dev server (the plans route, cross-origin isolation headers, the checkouts with `BLOCKSCOPE_LINK`) |
 | `scripts/dev-local.mjs` | `npm run dev:local`: the renderer's watch build and the dev server against the checkouts beside this one |
-| `scripts/share.mjs`, `scripts/r2-cors.json` | `npm run share`: a schematic up to (or down from) the files bucket, and the bucket's CORS rules |
 | `public/_headers` | the same headers for Cloudflare Pages |
 | `.env.production` | the site's plans base (the files bucket) and the file it opens by default |
 

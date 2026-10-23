@@ -14,7 +14,6 @@
     "dev:local": "node scripts/dev-local.mjs",
     "build": "vite build",
     "preview": "vite preview",
-    "share": "node scripts/share.mjs",
     "test": "node --test"
   },
   "dependencies": {
