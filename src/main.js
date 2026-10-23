@@ -24,7 +24,12 @@ addEventListener("unhandledrejection", (ev) => { const el = $("status"); if (el)
 const typing = (ev) => ["INPUT", "TEXTAREA", "SELECT"].includes(ev.target?.tagName);
 const params = new URLSearchParams(location.search);
 // The status line: dim once the file is rendered, green while something loads, red for an error.
-const status = (text, kind = "") => { const el = $("status"); el.textContent = text; el.title = text; el.className = kind; };
+const status = (text, kind = "") => { const el = $("status"); el.textContent = text; el.title = text; el.className = kind; if (kind === "err") failWaiters(text); };
+// Agents and scripts (AGENTS.md): every drawn file, once its view has settled, counts in `settled`, so
+// blockscope.ready() can wait for one; an error before the first one fails the wait instead of leaving it hanging.
+const renders = { settled: 0, waiters: [], timer: 0, failed: null };
+// ?agent=1 in development: the pack download goes ahead without the prompt (an agent cannot click it). Never in a build.
+const AGENT = import.meta.env.DEV && /^(1|on|yes|true)$/i.test(params.get("agent") ?? "");
 const SCHEM_ID = "blockscope";   // the renderer's name for the loaded file (one at a time)
 
 // ---- the loaded file ------------------------------------------------------------------------------------------------
@@ -115,7 +120,10 @@ function setFile(f, { fromUrl = false } = {}) {
     // ?at=x,y,z (world coordinates): the block pinned once the file is drawn
     const at = (params.get("at") ?? "").split(",").map((s) => (s.trim() === "" ? NaN : Number(s)));
     pinned.wanted = at.length === 3 && at.every(Number.isInteger) ? at : null;
-  } else { shell.roof = !roofHiddenByDefault(); savedView.on = false; userMoved = false; pinned.wanted = null; }
+    // ?focus=x,y,z (world coordinates) or ?focus=<part>: the camera flies there once the file is drawn
+    const fo = (params.get("focus") ?? "").trim(), fb = fo.match(/^(-?\d+),(-?\d+),(-?\d+)$/);
+    focusWanted = fb ? { block: fb.slice(1).map(Number) } : fo ? { part: fo } : null;
+  } else { shell.roof = !roofHiddenByDefault(); savedView.on = false; userMoved = false; pinned.wanted = null; focusWanted = null; }
   applyLayers(); showShellState(); renderParts(); showBlock(null);
 }
 /** Reads a schematic file's bytes into the page's file record. */
@@ -227,6 +235,7 @@ function attachMarks() {
 }
 // the pinned block's file cell, so the mark survives a reload; `wanted` is a link's ?at= (world), pinned once drawn
 const pinned = { cell: null, wanted: null };
+let focusWanted = null;   // a link's ?focus= ({ block: [x, y, z] } world, or { part }), applied once the view settles
 function placeBox(which, cell) { attachMarks(); const box = which === "pin" ? pinBox : hoverBox; if (!box) return; if (!cell) { box.visible = false; } else { box.position.set(...cellCenter(cell.x, cell.y, cell.z)); box.visible = true; } redraw(); }
 // a part's cells (file coordinates) from the metadata, once per part; the ghost shows the ones in the layer range
 // whose shell part is not hidden (a hidden part still shows, that is what the ghost is for)
@@ -269,6 +278,7 @@ const pickSource = () => { source = chosenSource ?? autoSource(); };
 const PACK_CONSENT = "blockscope.consent";
 let consentWaiter = null;
 function askConsent(what) {
+  if (AGENT) { console.info("[blockscope] ?agent=1: the download goes ahead without asking (development only)", what); return Promise.resolve(); }
   try { if (localStorage.getItem(PACK_CONSENT) === "1") return Promise.resolve(); } catch {}
   const mb = (n) => (n >= 1e6 ? `${Math.round(n / 1e6)} MB` : `${Math.max(1, Math.round(n / 1e3))} kB`);
   const parts = [];
@@ -405,6 +415,7 @@ async function startRenderer() {
         onSchematicLoaded: () => status(`${schemName} parsed, building meshes…`, "busy"),
         onSchematicRendered: () => {
           status(capture.after ?? `rendered ${schemName}${source.none && wantedNamespaces(file.schem).length ? ": it lists no mods, so its modded blocks need your own pack (File, Resource pack)" : ""}`); capture.after = null; pinGroup(); renderUnknown(); buildOverlayPaintings(); tuneControls(); keepBackground();
+          settleSoon();
           attachMarks(); placeBox("pin", pinned.cell);
           if (pinned.wanted) { const w = pinned.wanted; pinned.wanted = null; if (!pinWorld(...w)) status(`?at=${w.join(",")} is outside ${schemName}`, "err"); }
           if (capture.on) { capture.rendered?.(); return; }   // the build animation holds the camera itself
@@ -807,22 +818,29 @@ $("partFilter").onkeydown = (ev) => { if (ev.key === "Escape") { ev.target.value
 function selectPartRow(name) { for (const [n, r] of partRows) r.classList.toggle("sel", n === name); }
 function revealPartRow(name) { $("partsGrp").open = true; const r = partRows.get(name); if (!r) return; $("partFilter").value = ""; renderParts(); selectPartRow(name); partRows.get(name)?.scrollIntoView({ block: "nearest" }); }
 // Fly to a part: aim the orbit pivot at the middle of its blocks and back the camera off along its current direction
-// far enough to see the whole part.
+// far enough to see the whole part. Returns the box flown to (file cells, inclusive), or null.
 function flyToPart(name) {
-  const ctl = controls(), cam = camera(), g = group(); if (!ctl?.target || !cam || !g) return;
   const [lo, hi] = shownRange();
   let cells = cellsOfPart(name).filter(([, y, , sp]) => y >= lo && y <= hi && !(sp && !shell[sp]));
-  if (!cells.length) cells = cellsOfPart(name); if (!cells.length) return;
+  if (!cells.length) cells = cellsOfPart(name); if (!cells.length) return null;
   const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
   for (const c of cells) for (let i = 0; i < 3; i++) { min[i] = Math.min(min[i], c[i]); max[i] = Math.max(max[i], c[i]); }
+  return flyToBox(min, max) ? { min, max } : null;
+}
+/** Frames the file cells from `min` to `max` (inclusive) as flyToPart does; false before the renderer is up. */
+function flyToBox(min, max) {
+  const ctl = controls(), cam = camera(), g = group(); if (!ctl?.target || !cam || !g) return false;
+  // a view a reload is still about to put back would undo the flight (as a click cancels it too)
+  cancelRestores(); stopMomentum();
   userMoved = true;
-  if (topView.on) { topFit(new THREE.Box3(g.localToWorld(new THREE.Vector3(...min).subScalar(0.5)), g.localToWorld(new THREE.Vector3(...max).addScalar(0.5)))); return; }
+  if (topView.on) { topFit(new THREE.Box3(g.localToWorld(new THREE.Vector3(...min).subScalar(0.5)), g.localToWorld(new THREE.Vector3(...max).addScalar(0.5)))); return true; }
   const center = g.localToWorld(new THREE.Vector3((min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2));
   const size = Math.max(max[0] - min[0], max[1] - min[1], max[2] - min[2]) + 1;
   const dir = cam.position.clone().sub(ctl.target).normalize(); if (dir.lengthSq() < 1e-6) dir.set(0.5, 0.6, 0.6).normalize();
   const fov = cam.isPerspectiveCamera ? (cam.fov * Math.PI) / 180 : 1;
   const dist = cam.isPerspectiveCamera ? (size / 2) / Math.tan(fov / 2) * 1.25 + 2 : cam.position.distanceTo(ctl.target);
   ctl.target.copy(center); cam.position.copy(center).addScaledVector(dir, dist); ctl.update?.(); userMoved = true; redraw();
+  return true;
 }
 // The renderer refits its camera to the schematic on every load, so a layer change would throw the view back to the
 // overview. The view is saved before the reload and put back once the new meshes are rendered (and again a moment
@@ -1351,6 +1369,107 @@ let flyLast = performance.now();
   userMoved = true; noteInput();
 })(flyLast);
 
+// ---- agents (AGENTS.md) ---------------------------------------------------------------------------------------------
+// A render settles 700 ms later, once the renderer's own deferred refits (and restoreSoon's) are over, so a camera
+// moved then stays where it is put. A link's ?focus= is applied at that point, then blockscope.ready() and nextRender()
+// resolve with the page's state.
+function settleSoon() {
+  clearTimeout(renders.timer);
+  renders.timer = setTimeout(() => {
+    renders.settled++;
+    if (focusWanted) {
+      const w = focusWanted; focusWanted = null;
+      try { if (w.block) focusBlockNow(...w.block); else focusPartNow(w.part); } catch (e) { status(`?focus=${w.block ? w.block.join(",") : w.part}: ${e.message}`, "err"); }
+    }
+    const state = agentState();
+    for (const w of renders.waiters.splice(0)) w.resolve(state);
+  }, 700);
+}
+// An error before the renderer exists (the file could not be read) ends the wait for the first render; later ones
+// (a pack that fails, say) show in the state, and a wait that outlasts them times out with the status line.
+function failWaiters(text) {
+  if (renders.settled || renderer) return;
+  renders.failed = text;   // for a ready() that comes after it
+  for (const w of renders.waiters.splice(0)) w.reject(new Error(text));
+}
+function waitSettle(timeout) {
+  return new Promise((resolve, reject) => {
+    const w = { resolve: (v) => { clearTimeout(t); resolve(v); }, reject: (e) => { clearTimeout(t); reject(e); } };
+    const t = setTimeout(() => { renders.waiters.splice(renders.waiters.indexOf(w) >>> 0, 1); reject(new Error(`no render within ${timeout} ms; status: ${$("status").textContent}`)); }, timeout);
+    renders.waiters.push(w);
+  });
+}
+/** The first render, settled (at once when it already has); the first visit's pack download can take minutes. */
+const ready = (timeout = 300000) => (renders.settled ? Promise.resolve(agentState())
+  : renders.failed && !renderer ? Promise.reject(new Error(renders.failed)) : waitSettle(timeout));
+const toWorld = ([x, y, z]) => [x + info.offset[0], y + info.offset[1], z + info.offset[2]];
+/** What the page shows, in world coordinates: the file, its size and origin (the world position of file cell 0,0,0),
+ *  the parts hidden, the layers drawn, the pinned block, the camera, the pack and the status line. */
+function agentState() {
+  const cam = camera(), ctl = controls(), r = (v) => (v ? [v.x, v.y, v.z].map((n) => Math.round(n * 100) / 100) : null);
+  return {
+    file: schemName || null, status: $("status").textContent, error: $("status").className === "err", agent: AGENT,
+    size: [info.width, info.height, info.length], origin: [...info.offset],
+    parts: info.parts.length, hiddenParts: [...hiddenPartSet], layers: { mode: layer.mode, fileY: shownRange() },
+    pinned: pinned.cell ? toWorld([pinned.cell.x, pinned.cell.y, pinned.cell.z]) : null,
+    camera: cam ? { position: r(cam.position), target: r(ctl?.target), view: topView.on ? "top" : camPreset } : null,
+    pack: currentPack, unknownBlocks: unknown.size, url: location.href,
+  };
+}
+const partList = () => info.parts.map((p) => ({ name: p.name, blocks: p.count, hidden: hiddenPartSet.has(p.name) }));
+function findPart(name) {
+  const n = String(name), p = info.parts.find((q) => q.name === n) ?? info.parts.find((q) => q.name.toLowerCase() === n.toLowerCase());
+  if (p) return p;
+  const names = info.parts.map((q) => q.name);
+  throw new Error(`${schemName} has no part "${n}"; ${names.length ? `its parts: ${names.slice(0, 40).join(", ")}${names.length > 40 ? ", …" : ""}` : "it has no parts (no metadata)"}`);
+}
+function focusPartNow(name, { highlight = false } = {}) {
+  const p = findPart(name), box = flyToPart(p.name);
+  if (!box) throw new Error(`part ${p.name} has no blocks to fly to`);
+  revealPartRow(p.name); if (highlight) showGhost(p.name);
+  return { part: p.name, blocks: p.count, from: toWorld(box.min), to: toWorld(box.max) };
+}
+/** Flies to a part (shown first if it was hidden; `solo` hides every other part), lights it up when asked. */
+async function focusPart(name, { solo = false, highlight = false } = {}) {
+  await ready();
+  const p = findPart(name);
+  const want = solo ? info.parts.filter((q) => q.name !== p.name).map((q) => q.name) : [...hiddenPartSet].filter((n) => n !== p.name);
+  if (want.length !== hiddenPartSet.size || want.some((n) => !hiddenPartSet.has(n))) {
+    hiddenPartSet.clear(); for (const n of want) hiddenPartSet.add(n); renderParts();
+    // both: the reload sets its view-restore timers after it returns, and the flight below cancels them
+    const settled = waitSettle(120000);
+    await reloadLayers(solo ? `only ${p.name}` : `with ${p.name}`);
+    await settled;
+  }
+  return focusPartNow(p.name, { highlight });
+}
+function focusBlockNow(wx, wy, wz, { radius = 3, pin = true } = {}) {
+  const [ox, oy, oz] = info.offset, c = [wx - ox, wy - oy, wz - oz];
+  if (![wx, wy, wz].every(Number.isInteger) || c.some((v, i) => v < 0 || v >= [info.width, info.height, info.length][i])) {
+    throw new Error(`${wx},${wy},${wz} is outside ${schemName} (world ${info.offset.join(",")} to ${toWorld([info.width - 1, info.height - 1, info.length - 1]).join(",")})`);
+  }
+  flyToBox(c.map((v) => v - radius), c.map((v) => v + radius));
+  if (pin) pinWorld(wx, wy, wz);
+  const so = renderer.schematicManager.getFirstSchematic();
+  return so ? describeBlock(so, ...c) : null;
+}
+/** Flies to a block (world coordinates), `radius` blocks of it around it, and pins it as a click would. */
+const focusBlock = async (x, y, z, opts) => { await ready(); return focusBlockNow(x, y, z, opts); };
+/** The blocks whose id[state] contains `query` (or matches it, a RegExp), in world coordinates, with their part. */
+function findBlocks(query, { limit = 200 } = {}) {
+  const s = file?.schem; if (!s) return { total: 0, blocks: [] };
+  const test = query instanceof RegExp ? (k) => query.test(k) : (k) => k.includes(String(query));
+  const want = new Set(); s.keys.forEach((k, i) => { if (k && test(k)) want.add(i); });
+  const blocks = []; let total = 0;
+  for (let i = 0; i < s.data.length; i++) {
+    if (!want.has(s.data[i])) continue;
+    total++; if (blocks.length >= limit) continue;
+    const [x, y, z] = s.cellOf(i), m = s.metaAt(meta, x, y, z);
+    blocks.push({ at: toWorld([x, y, z]), block: s.keys[s.data[i]], part: m ? partOf(m) : null });
+  }
+  return { total, blocks };
+}
+
 // ---- console and test helpers ---------------------------------------------------------------------------------------
 const blobToDataUrl = (b) => new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(b); });
 // shot([x,y,z], [tx,ty,tz]) places the orbit camera (file block coordinates: x, z as in the file, y from the bottom
@@ -1378,6 +1497,8 @@ window.blockscope = {
   },
   async captureBuild(opts = {}) { Object.assign(window.buildGif, { download: false }, opts); const r = await captureBuild(); return r && { ...r, dataUrl: await blobToDataUrl(lastGif) }; },
   hitUnderPointer, schematicMeshes, controls, camera,
+  // for agents (AGENTS.md): wait for a render, read the state, find and frame blocks and parts
+  ready, nextRender: (timeout = 120000) => waitSettle(timeout), state: agentState, parts: partList, findBlocks, focusPart, focusBlock,
 };
 window.inspectAt = pinWorld;
 
