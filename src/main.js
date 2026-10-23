@@ -112,7 +112,10 @@ function setFile(f, { fromUrl = false } = {}) {
       let hi = maxY === null ? info.height : Number(maxY); if (hi < 0) hi = info.height + hi;
       layer.mode = minY !== null && Number(minY) > 0 ? "above" : "below"; layer.cur = layer.mode === "above" ? Number(minY) : Math.max(0, hi - 1);
     }
-  } else { shell.roof = !roofHiddenByDefault(); savedView.on = false; userMoved = false; }
+    // ?at=x,y,z (world coordinates): the block pinned once the file is drawn
+    const at = (params.get("at") ?? "").split(",").map((s) => (s.trim() === "" ? NaN : Number(s)));
+    pinned.wanted = at.length === 3 && at.every(Number.isInteger) ? at : null;
+  } else { shell.roof = !roofHiddenByDefault(); savedView.on = false; userMoved = false; pinned.wanted = null; }
   applyLayers(); showShellState(); renderParts(); showBlock(null);
 }
 /** Reads a schematic file's bytes into the page's file record. */
@@ -222,7 +225,8 @@ function attachMarks() {
     hoverBox = outlineOf(0xffffff, 1.03, 0.16); pinBox = outlineOf(0x6fb3ff, 1.07, 0.3); markGroup.add(hoverBox, pinBox);
     if (keep.h) { hoverBox.visible = true; hoverBox.position.copy(keep.hp); } if (keep.p) { pinBox.visible = true; pinBox.position.copy(keep.pp); } }
 }
-const pinned = { cell: null };   // the pinned block's file cell, so the mark survives a reload
+// the pinned block's file cell, so the mark survives a reload; `wanted` is a link's ?at= (world), pinned once drawn
+const pinned = { cell: null, wanted: null };
 function placeBox(which, cell) { attachMarks(); const box = which === "pin" ? pinBox : hoverBox; if (!box) return; if (!cell) { box.visible = false; } else { box.position.set(...cellCenter(cell.x, cell.y, cell.z)); box.visible = true; } redraw(); }
 // a part's cells (file coordinates) from the metadata, once per part; the ghost shows the ones in the layer range
 // whose shell part is not hidden (a hidden part still shows, that is what the ghost is for)
@@ -402,6 +406,7 @@ async function startRenderer() {
         onSchematicRendered: () => {
           status(capture.after ?? `rendered ${schemName}${source.none && wantedNamespaces(file.schem).length ? ": it lists no mods, so its modded blocks need your own pack (File, Resource pack)" : ""}`); capture.after = null; pinGroup(); renderUnknown(); buildOverlayPaintings(); tuneControls(); keepBackground();
           attachMarks(); placeBox("pin", pinned.cell);
+          if (pinned.wanted) { const w = pinned.wanted; pinned.wanted = null; if (!pinWorld(...w)) status(`?at=${w.join(",")} is outside ${schemName}`, "err"); }
           if (capture.on) { capture.rendered?.(); return; }   // the build animation holds the camera itself
           if (savedView.on) restoreSoon();
           else if (!userMoved) smartFit();
@@ -682,13 +687,46 @@ function describeBlock(so, x, y, z) {
     // a shell block the page hides is air in the rendered file; its metadata still names it, so say so
     const hidden = id === "minecraft:air" && part ? shellOfMeta(part) ?? (hiddenPartSet.has(partOf(part)) ? `part ${partOf(part)}` : null) : null;
     if (hidden) id = `air (hidden ${hidden})`;
-    // what the file and the page know about it: a sign's text (dye, glow, waxed, back side), a painting on this block
+    // what the file and the page know about it: a sign's text (dye, glow, waxed, back side), a painting on this block;
+    // `quote` is the short form a copy carries (the sign's front text, the painting's label)
     const k = `${x},${y},${z}`, s = signAt.get(k), p = paintingAt.get(k);
     const sideText = (t) => `"${t.lines.filter(Boolean).join(" / ") || " "}" in ${t.color.replace("_", " ")}${t.glow ? ", glowing" : ""}`;
-    const extra = s && b ? { kind: "sign", text: `front ${sideText(s)}${s.back ? `; back ${sideText(s.back)}` : "; back empty"}${s.waxed ? "; waxed (no edits)" : ""}` }
-      : p ? { kind: "painting", text: `Immersive Painting "${p.label}", ${p.w}×${p.h} blocks, ${p.img.replace(/^paintings\//, "")}, facing ${({ N: "north", S: "south", E: "east", W: "west" })[p.dir] ?? p.dir}; hangs on this block (placed by hand, not in the file)` } : null;
-    return { id, state, pos: `x ${x + ox}  y ${y + oy}  z ${z + oz}  (file ${x},${y},${z})`, part, extra, frame: frame ?? part?.frame ?? null, cell: { x, y, z } };
-  } catch (e) { return { id: `could not read the block: ${e.message}`, state: [], pos: "", part: null, extra: null, frame: null, cell: null }; }
+    const extra = s && b ? { kind: "sign", quote: s.lines.filter(Boolean).join(" / "), text: `front ${sideText(s)}${s.back ? `; back ${sideText(s.back)}` : "; back empty"}${s.waxed ? "; waxed (no edits)" : ""}` }
+      : p ? { kind: "painting", quote: p.label, text: `Immersive Painting "${p.label}", ${p.w}×${p.h} blocks, ${p.img.replace(/^paintings\//, "")}, facing ${({ N: "north", S: "south", E: "east", W: "west" })[p.dir] ?? p.dir}; hangs on this block (placed by hand, not in the file)` } : null;
+    return { id, state, pos: `x ${x + ox}  y ${y + oy}  z ${z + oz}  (file ${x},${y},${z})`, part, extra, frame: frame ?? part?.frame ?? null, hidden, cell: { x, y, z }, world: [x + ox, y + oy, z + oz] };
+  } catch (e) { return { id: `could not read the block: ${e.message}`, state: [], pos: "", part: null, extra: null, frame: null, hidden: null, cell: null, world: null }; }
+}
+// A block as plain text to paste anywhere: the file and where it is (world, then file coordinates), the block in
+// Minecraft's id[state] form (valid /setblock syntax), its part and code, its frame, sign or painting, and a link that
+// opens the page with it pinned (only for a file opened from a link).
+function blockText(d) {
+  const clip = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+  const [wx, wy, wz] = d.world, { x, y, z } = d.cell;
+  const state = d.state.length ? `[${d.state.map(([k, v]) => `${k}=${v}`).join(",")}]` : "";
+  const lines = [`${schemName}  x ${wx} y ${wy} z ${wz}  (file ${x},${y},${z})`, d.hidden ? `minecraft:air (hidden: ${d.hidden})` : `${d.id}${state}`];
+  const pn = d.part ? partOf(d.part) : null;
+  const code = d.part?.code ? `code ${d.part.code}${d.part.line ? `, line ${d.part.line}` : ""}` : null;
+  const partLine = [pn && `part ${pn}`, code].filter(Boolean).join(" · ");
+  if (partLine) lines.push(partLine);
+  if (d.frame) lines.push(`framed ${d.frame}`);
+  if (d.extra?.quote) lines.push(`${d.extra.kind} "${clip(d.extra.quote, 40)}"`);
+  if (file?.param) { syncUrl(true); lines.push(location.href); }
+  return lines.join("\n");
+}
+/** Copies the pinned block (read again, so a simulated change shows). */
+async function copyBlock() {
+  const so = renderer?.schematicManager.getFirstSchematic(), c = pinned.cell;
+  if (!so || !c) { status("click a block first, then copy it"); return; }
+  const d = describeBlock(so, c.x, c.y, c.z); if (!d.cell) { status(d.id, "err"); return; }
+  try { await navigator.clipboard.writeText(blockText(d)); status(`copied ${d.id.replace(/^minecraft:/, "")} at ${d.world.join(" ")}`); }
+  catch { status("could not copy the block", "err"); }
+}
+/** Pins a block by world coordinates as a click would (?at=, window.inspectAt); false when it is outside the file. */
+function pinWorld(wx, wy, wz) {
+  const so = renderer?.schematicManager.getFirstSchematic(); if (!so) return false;
+  const [ox, oy, oz] = info.offset, x = wx - ox, y = wy - oy, z = wz - oz;
+  if (x < 0 || y < 0 || z < 0 || x >= info.width || y >= info.height || z >= info.length) return false;
+  showBlock(describeBlock(so, x, y, z)); return true;
 }
 const itemText = (s) => (s.includes("/") ? s : s.replace(/minecraft:/g, ""));   // ids without the namespace; a rule list (regexes) as is
 // The Block group is a properties list: only the rows that have something to say, the block's id first, its state as
@@ -696,8 +734,9 @@ const itemText = (s) => (s.includes("/") ? s : s.replace(/minecraft:/g, ""));   
 // to its part in the Parts list. Nothing is pinned: a one-line prompt instead.
 function showBlock(d) {
   const list = $("props"); list.replaceChildren();
-  pinned.cell = d?.cell ?? null; placeBox("pin", pinned.cell);
+  pinned.cell = d?.cell ?? null; placeBox("pin", pinned.cell); syncUrl();
   $("propsEmpty").style.display = d ? "none" : "";
+  $("propsBar").style.display = d?.cell ? "" : "none";
   $("inspectSum").textContent = d ? d.id.replace(/^minecraft:/, "").replace(/\s*\(.*$/, "") : "";
   selectPartRow(d?.part ? partOf(d.part) : null);
   if (!d) return;
@@ -1234,10 +1273,15 @@ function syncUrl(now = false) {
     if (layer.mode !== "all") q.set("layer", `${layer.mode},${layer.cur}`); else q.delete("layer");
     const c = userMoved ? camText() : ""; if (c) q.set("cam", c); else q.delete("cam");
     if (topView.on) q.set("view", `top,${topView.q},${Math.round((camera()?.zoom ?? 1) * 1000) / 1000}`); else q.delete("view");
-    const s = u.toString(); if (s !== location.href) history.replaceState(null, "", s);
+    // the pinned block, world coordinates (a link's ?at= stays until the file is drawn and it is pinned)
+    const pc = pinned.cell, [ox, oy, oz] = info.offset;
+    if (pc) q.set("at", `${pc.x + ox},${pc.y + oy},${pc.z + oz}`); else if (!pinned.wanted) q.delete("at");
+    // commas as themselves (?at=1,2,3, not 1%2C2%2C3): legal in a query and readable in a pasted link
+    const s = u.toString().replace(/%2C/gi, ","); if (s !== location.href) history.replaceState(null, "", s);
   };
   if (now) write(); else urlTimer = setTimeout(write, 400);
 }
+$("copyBlock").onclick = copyBlock;
 $("copyLink").onclick = async () => {
   if (!file?.param) { status("a file opened from disk cannot be linked: a link could not bring it back"); return; }
   syncUrl(true);
@@ -1267,6 +1311,7 @@ addEventListener("keydown", (ev) => {
   else if (k === "r" || k === "R") { if (!$("shell-roof").disabled) $("shell-roof").click(); }
   else if (k === "1") setMode("all"); else if (k === "2") setMode("single"); else if (k === "3") setMode("below"); else if (k === "4") setMode("above");
   else if (k === "h" || k === "H") setCollapsed(!hud.classList.contains("collapsed"));
+  else if (k === "c" || k === "C") copyBlock();
   else if (k === "?" || (c === "Slash" && ev.shiftKey)) setHelp(!help.classList.contains("on"));
   else if (k === "Escape") { if (about.classList.contains("on")) setAbout(false); else if (help.classList.contains("on")) setHelp(false); else showBlock(null); }
   else return;
@@ -1334,7 +1379,7 @@ window.blockscope = {
   async captureBuild(opts = {}) { Object.assign(window.buildGif, { download: false }, opts); const r = await captureBuild(); return r && { ...r, dataUrl: await blobToDataUrl(lastGif) }; },
   hitUnderPointer, schematicMeshes, controls, camera,
 };
-window.inspectAt = (x, y, z) => { const so = renderer?.schematicManager.getFirstSchematic(); const [ox, oy, oz] = info.offset; if (so) showBlock(describeBlock(so, x - ox, y - oy, z - oz)); };
+window.inspectAt = pinWorld;
 
 // ---- start ----------------------------------------------------------------------------------------------------------
 showShellState(); renderParts(); renderPackInfo();

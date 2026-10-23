@@ -86,6 +86,7 @@ done. `package.json` is untouched: `npm run dev`, `npm run build` and the deploy
 | `?part=a,b`, `?hidePart=a,b` | only those parts, or those parts hidden (names as the Parts list spells them) |
 | `?layer=below,N`, `?minY=M&maxY=N` | a layer mode at file layer N, or a layer range (N exclusive, negative from the top) |
 | `?cam=px,py,pz,tx,ty,tz` | the camera and its pivot, world coordinates |
+| `?at=x,y,z` | the block pinned in the Block panel, world coordinates (the address bar follows the pin; Copy in the Block panel, or <kbd>C</kbd>, copies it with this link) |
 | `?sim=on` | the redstone simulator |
 | `?pick=off` | no block picking (the renderer's) |
 
