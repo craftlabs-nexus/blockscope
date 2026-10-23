@@ -1,14 +1,14 @@
 // Plan files: a schematic on the site (or on an allowed origin) with what its generator wrote beside it, the block
 // metadata (<name>.meta.json: owner, role, item, part, shell per world position; read only for a file that carries
 // none of its own) and the paintings (<name>.paintings.json). `?schem=` names one: a path under the plans base
-// (VITE_PLANS_BASE, default /plans/, which the dev server maps to the BLOCKSCOPE_PLANS folder) or a full URL on one of
-// the allowed origins.
+// (VITE_PLANS_BASE: in development /plans/, which the dev server maps to the BLOCKSCOPE_PLANS folder; on the site the
+// files bucket, https://files.craftlabs.nexus/, from .env.production) or a full URL on one of the allowed origins.
 
 export const PLANS_BASE = import.meta.env.VITE_PLANS_BASE || "/plans/";
 // the origins a ?schem= URL may point at besides the page's own (they must allow cross-origin reads)
 export const ALLOWED_ORIGINS = ["https://gg.craftlabs.nexus", "https://files.craftlabs.nexus", ...(import.meta.env.VITE_ALLOWED_ORIGINS ?? "").split(",").filter(Boolean)];
 // the file opened without ?schem=: none until VITE_DEFAULT_PLAN names one (in development, a file in the
-// BLOCKSCOPE_PLANS folder; in a production build, one of public/plans/, from .env.production)
+// BLOCKSCOPE_PLANS folder; on the site, one in the files bucket, from .env.production)
 export const DEFAULT_PLAN = import.meta.env.VITE_DEFAULT_PLAN ?? "";
 export const SCHEMATIC_EXT = /\.(schem|schematic|litematic|nbt)$/i;
 

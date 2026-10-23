@@ -4,8 +4,9 @@
 //
 //   node scripts/share.mjs <file> [<file> ...]        (npm run share -- <file>)
 //       uploads each file and, unless --only, the same design's .schem and .litematic beside it (a .nbt goes when it is
-//       named) and its name.meta.json if there is one (the parts, for a file that carries no metadata of its own):
-//       the page's Download row offers whichever schematics are there
+//       named), its name.meta.json if there is one (the parts, for a file that carries no metadata of its own), and
+//       its name.paintings.json with the images it names: the page's Download row offers whichever schematics are
+//       there. The bucket is the site's plans base, so the link names the file alone (?schem=name.schem)
 //   node scripts/share.mjs --delete <name> [...]      removes name (with its extension), or every format of it
 //   --dir <folder>                                    puts the files under that folder in the bucket
 //
@@ -40,7 +41,9 @@ function localPath(p) {
 }
 const keyOf = (name) => (dir ? `${dir}/${name}` : name);
 const urlOf = (key) => `${FILES_BASE}/${key.split("/").map(encodeURIComponent).join("/")}`;
-const viewerLink = (key) => `${SITE}/?schem=${urlOf(key)}`;
+// the bucket is the site's plans base (VITE_PLANS_BASE in .env.production), so a link names the file alone
+const viewerLink = (key) => `${SITE}/?schem=${key.split("/").map(encodeURIComponent).join("/")}`;
+const TYPES = { ".json": "application/json", ".png": "image/png", ".webp": "image/webp", ".jpg": "image/jpeg" };
 
 function wrangler(...rest) {
   const r = spawnSync("npx", ["--yes", WRANGLER, ...rest], {
@@ -52,7 +55,7 @@ function wrangler(...rest) {
 
 if (remove) {
   for (const name of args) {
-    const names = path.extname(name) ? [name] : [...FORMATS, ".nbt", ".meta.json"].map((e) => name + e);
+    const names = path.extname(name) ? [name] : [...FORMATS, ".nbt", ".meta.json", ".paintings.json"].map((e) => name + e);
     for (const n of names) {
       const r = wrangler("r2", "object", "delete", `${BUCKET}/${keyOf(n)}`, "--remote");
       console.log(r.ok ? `deleted ${keyOf(n)}` : `${keyOf(n)}: ${r.out.split("\n").pop()}`);
@@ -71,12 +74,23 @@ for (const arg of args) {
   if (only) continue;
   const stem = file.replace(/\.[^.]+$/, "");
   for (const ext of [...FORMATS, ".meta.json"]) if (fs.existsSync(stem + ext)) files.set(stem + ext, keyOf(path.basename(stem + ext)));
+  // the paintings and their images, at the same places relative to the JSON as beside the file
+  const paintings = `${stem}.paintings.json`;
+  if (fs.existsSync(paintings)) {
+    files.set(paintings, keyOf(path.basename(paintings)));
+    for (const p of JSON.parse(fs.readFileSync(paintings, "utf8")).paintings ?? []) {
+      if (!p.img || /^[a-z]+:|^\/|\.\./i.test(p.img)) continue;   // only images beside it (no URL, no ..)
+      const img = path.join(path.dirname(file), p.img);
+      if (fs.existsSync(img)) files.set(img, keyOf(p.img.replaceAll("\\", "/")));
+      else console.error(`warning: ${p.img} (a painting in ${path.basename(paintings)}) is missing`);
+    }
+  }
 }
 
 let failed = false;
 for (const [file, key] of files) {
   process.stdout.write(`uploading ${key} (${fs.statSync(file).size} bytes)… `);
-  const type = key.endsWith(".json") ? "application/json" : "application/octet-stream";
+  const type = TYPES[path.extname(key).toLowerCase()] ?? "application/octet-stream";
   const r = wrangler("r2", "object", "put", `${BUCKET}/${key}`, "--file", file, "--remote",
     "--content-type", type, "--cache-control", "public, max-age=300");
   if (!r.ok) { failed = true; console.log(`failed\n${r.out}`); continue; }

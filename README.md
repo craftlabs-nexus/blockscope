@@ -108,20 +108,19 @@ done. `package.json` is untouched: `npm run dev`, `npm run build` and the deploy
 
 | Parameter | Effect |
 |---|---|
-| `?schem=<path or URL>` | a plan file under the plans base (`VITE_PLANS_BASE`, default `/plans/`) or a URL on an allowed origin (the page's own, `https://gg.craftlabs.nexus`, `VITE_ALLOWED_ORIGINS`) |
+| `?schem=<path or URL>` | a plan file under the plans base (`VITE_PLANS_BASE`: the files bucket on the site, `/plans/` in development) or a URL on an allowed origin (the page's own, `https://files.craftlabs.nexus`, `https://gg.craftlabs.nexus`, `VITE_ALLOWED_ORIGINS`) |
 | `?hide=roof,wall,floor`, `?roof=on`, `?roof=off` | the shell parts hidden at first (the roof starts hidden when it covers most of the footprint) |
 | `?part=a,b`, `?hidePart=a,b` | only those parts, or those parts hidden (names as the Parts list spells them) |
 | `?layer=below,N`, `?minY=M&maxY=N` | a layer mode at file layer N, or a layer range (N exclusive, negative from the top) |
 | `?cam=px,py,pz,tx,ty,tz` | the camera and its pivot, world coordinates |
 | `?at=x,y,z` | the block pinned in the Block panel, world coordinates (the address bar follows the pin; Copy in the Block panel, or <kbd>C</kbd>, copies it with this link) |
 | `?focus=x,y,z`, `?focus=<part>` | the camera flies to that block (world coordinates; it is pinned) or part once the file is drawn |
-| `?schem=https://files.craftlabs.nexus/<name>` | a shared file (`npm run share`, below) |
 | `?agent=1` | development only: the pack is downloaded without the consent prompt, for agents (`AGENTS.md`) |
 | `?sim=on` | the redstone simulator |
 | `?pick=off` | no block picking (the renderer's) |
 
 Build settings: `VITE_PLANS_BASE`, `VITE_ALLOWED_ORIGINS` (comma separated), `VITE_DEFAULT_PLAN` (the file opened
-without `?schem=`; none unless set, and `gull-rock.schem` in a production build, from `.env.production`).
+without `?schem=`; none unless set). `.env.production` sets both for the site: the files bucket, and `gull-rock.schem`.
 
 ## Block metadata in the file
 
@@ -169,22 +168,22 @@ Cloudflare's Git integration (Workers Builds) builds and deploys it from this re
 command `npm run build`, deploy command `npx wrangler deploy`, preview command the default (`npx wrangler preview`)
 for other branches; no build variables (`.node-version` pins Node 24; Node 20 or later works). `public/_headers` sets the
 cross-origin isolation headers, and a path that is no file answers 404. Check a build locally with `npm run build`
-then `npx wrangler dev` (or `npx wrangler deploy --dry-run`). The site's own plan files are in `public/plans/`
-(served at `/plans/`): the Gull Rock lighthouse, `gull-rock.schem` with its paintings, copied from the storage plan,
-which the site opens by default (`.env.production`); `?schem=` opens any other file there or on an allowed origin.
+then `npx wrangler dev` (or `npx wrangler deploy --dry-run`). The site serves no plan files of its own: they are in
+the files bucket (below), its plans base, and it opens the Gull Rock lighthouse (`gull-rock.schem`) by default.
 
-## Sharing a file
+## Publishing a file
 
-Schematics to share live outside this repository, in the R2 bucket `blockscope-files` behind
-`https://files.craftlabs.nexus` (an allowed origin; the bucket's CORS rules are `scripts/r2-cors.json`):
+The site's schematics live outside this repository, in the R2 bucket `blockscope-files` behind
+`https://files.craftlabs.nexus` (the site's plans base and an allowed origin; the bucket's CORS rules are
+`scripts/r2-cors.json`). The Gull Rock lighthouse, the site's default, is there too.
 
 ```bash
-npm run share -- C:\path	o\design.litematic   # uploads it with design.schem (and design.meta.json) beside it
-npm run share -- --delete design                 # takes every format of it down
+npm run share -- C:\plans\design.litematic   # uploads it with design.schem beside it (and .meta.json, .paintings.json and its images)
+npm run share -- --delete design              # takes every format of it down
 ```
 
-It prints the link to send, `https://blockscope.craftlabs.nexus/?schem=https://files.craftlabs.nexus/design.schem`.
-The page's File group has a Download row for a file opened by its address: the file, and the same design's
+It prints the link to send, `https://blockscope.craftlabs.nexus/?schem=design.schem`; a full URL
+(`?schem=https://files.craftlabs.nexus/design.schem`) opens the same file. The page's File group has a Download row for a file opened by its address: the file, and the same design's
 `.schem`, `.litematic` or `.nbt` beside it. The script needs wrangler signed in to the Cloudflare account
 (`npx wrangler login`, or run it where wrangler already is, such as WSL: `node scripts/share.mjs <file>`); `--dir`
 puts files under a folder, `--only` leaves the other formats out.
@@ -205,7 +204,7 @@ puts files under a folder, `--only` leaves the other formats out.
 | `scripts/dev-local.mjs` | `npm run dev:local`: the renderer's watch build and the dev server against the checkouts beside this one |
 | `scripts/share.mjs`, `scripts/r2-cors.json` | `npm run share`: a schematic up to (or down from) the files bucket, and the bucket's CORS rules |
 | `public/_headers` | the same headers for Cloudflare Pages |
-| `public/plans/`, `.env.production` | the site's own plan files (the Gull Rock lighthouse and its paintings) and the file it opens by default |
+| `.env.production` | the site's plans base (the files bucket) and the file it opens by default |
 
 ## Where the game's files come from
 
