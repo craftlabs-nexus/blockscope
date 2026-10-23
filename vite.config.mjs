@@ -6,8 +6,7 @@ import { fileURLToPath } from "node:url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 // For development and for checking a build (`vite preview`): /plans/<name> serves the plan files of a local folder
-// (BLOCKSCOPE_PLANS, default the storage plan's folder of the server repository checked out beside the craftlabs
-// folder), read-only: schematics, their .meta.json and .paintings.json, and the painting images. A bare name is also looked for in its fixtures/ and
+// (BLOCKSCOPE_PLANS, in the environment or .env.local; none by default), read-only: schematics, their .meta.json and .paintings.json, and the painting images. A bare name is also looked for in its fixtures/ and
 // framing-options/ subfolders, as the plan's own viewer did. The deployed site has no such route: there the plans
 // are static files (VITE_PLANS_BASE).
 const PLAN_FILE = /\.(schem|schematic|litematic|nbt|json|png|webp)$/i;
@@ -19,7 +18,8 @@ function servePlans(root) {
     configurePreviewServer(server) { attach(server); },
   };
   function attach(server) {
-    if (!root || !fs.existsSync(root)) { server.config.logger.warn(`[blockscope] no plan folder at ${root}: /plans/ is off (set BLOCKSCOPE_PLANS)`); return; }
+    if (!root) { server.config.logger.info("[blockscope] /plans/ is off: set BLOCKSCOPE_PLANS (environment or .env.local) to serve a folder of plan files"); return; }
+    if (!fs.existsSync(root)) { server.config.logger.warn(`[blockscope] no plan folder at ${root}: /plans/ is off (BLOCKSCOPE_PLANS)`); return; }
     server.config.logger.info(`[blockscope] /plans/ serves ${root} (read-only)`);
     server.middlewares.use((req, res, next) => {
       const url = decodeURIComponent((req.url ?? "").split("?")[0]);
@@ -71,7 +71,7 @@ function linkedLibs(env) {
 
 export default defineConfig(({ mode }) => {
   const env = { ...loadEnv(mode, HERE, ""), ...process.env };
-  const plans = path.resolve(HERE, env.BLOCKSCOPE_PLANS ?? "../../server/storage-plan");
+  const plans = env.BLOCKSCOPE_PLANS ? path.resolve(HERE, env.BLOCKSCOPE_PLANS) : null;
   const linked = linkedLibs(env);
   return {
     plugins: [servePlans(plans)],

@@ -1,16 +1,16 @@
 // Plan files: a schematic on the site (or on an allowed origin) with what its generator wrote beside it, the block
 // metadata (<name>.meta.json: owner, role, item, part, shell per world position; read only for a file that carries
 // none of its own) and the paintings (<name>.paintings.json). `?schem=` names one: a path under the plans base
-// (VITE_PLANS_BASE, default /plans/, which the dev server maps to the storage plan's folder) or a full URL on one of
+// (VITE_PLANS_BASE, default /plans/, which the dev server maps to the BLOCKSCOPE_PLANS folder) or a full URL on one of
 // the allowed origins.
 
 export const PLANS_BASE = import.meta.env.VITE_PLANS_BASE || "/plans/";
 // the origins a ?schem= URL may point at besides the page's own (they must allow cross-origin reads)
 export const ALLOWED_ORIGINS = ["https://gg.craftlabs.nexus", ...(import.meta.env.VITE_ALLOWED_ORIGINS ?? "").split(",").filter(Boolean)];
-// the file opened without ?schem=: the hall in development (the dev server has the plan folder); none in a build until
-// VITE_DEFAULT_PLAN names one (the deployed site has no plan files of its own; some hosts even answer a missing path
+// the file opened without ?schem=: none until VITE_DEFAULT_PLAN names one (in development, a file in the
+// BLOCKSCOPE_PLANS folder; the deployed site has no plan files of its own, and some hosts even answer a missing path
 // with the page itself)
-export const DEFAULT_PLAN = import.meta.env.VITE_DEFAULT_PLAN ?? (import.meta.env.DEV ? "storage-hall.schem" : "");
+export const DEFAULT_PLAN = import.meta.env.VITE_DEFAULT_PLAN ?? "";
 export const SCHEMATIC_EXT = /\.(schem|schematic|litematic|nbt)$/i;
 
 /** The URL a ?schem= value names, or an error for an origin that is not allowed. */

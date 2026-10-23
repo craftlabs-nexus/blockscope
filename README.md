@@ -5,8 +5,8 @@ structure `.nbt`), builds a resource pack for it in your browser from Mojang's a
 draws it with [`@craftlabs/schematic-renderer`](https://github.com/craftlabs-nexus/schematic-renderer), so modded
 blocks show with their own textures. Nothing is uploaded and no server does any work: the host serves files.
 
-It grew out of the CraftLabs storage plan's viewer, and draws that plan's files by
-default: the storage hall, the engine room and their test fixtures, with the generator's metadata (what each block
+It grew out of the CraftLabs storage plan's viewer, and was built around that plan's
+files: the storage hall, the engine room and their test fixtures, with the generator's metadata (what each block
 is for), parts and paintings. The plan's `gull-rock.schem` is the demo: a lighthouse on a rock in the sea, every floor
 a part, a redstone cable up its stair, the keeper's log on its signs and three hidden keys, one for the layer slider,
 one for the Roof toggle and one for Inspect.
@@ -57,11 +57,17 @@ npm test           # the NBT codec, the formats and the schematic preparation (n
 npm run build      # the static site in dist/
 ```
 
-Node 20 or later. The dev server also serves a plan folder read-only at `/plans/` (schematics, `.meta.json`,
-`.paintings.json`, painting images), so `?schem=storage-hall.schem` opens a file from it; a bare name is also looked
-for in its `fixtures/` and `framing-options/` subfolders. The folder is `BLOCKSCOPE_PLANS` (in the environment or a
-`.env.local`), by default `../../server/storage-plan`, the storage plan of the server repository checked out beside
-the folder that holds this one. Without it, open or drop a file.
+Node 20 or later. The dev server can also serve a folder of plan files read-only at `/plans/` (schematics,
+`.meta.json`, `.paintings.json`, painting images): set `BLOCKSCOPE_PLANS` to it, in the environment or a `.env.local`
+(git ignores it), and `?schem=<name>` opens a file from it; a bare name is also looked for in its `fixtures/` and
+`framing-options/` subfolders. `VITE_DEFAULT_PLAN` there names the file opened without `?schem=`. Without a folder,
+open or drop a file.
+
+```bash
+# .env.local
+BLOCKSCOPE_PLANS=../path/to/plans
+VITE_DEFAULT_PLAN=some-file.schem
+```
 
 ### With the renderer and Packrat checked out beside it
 
@@ -93,7 +99,7 @@ done. `package.json` is untouched: `npm run dev`, `npm run build` and the deploy
 | `?pick=off` | no block picking (the renderer's) |
 
 Build settings: `VITE_PLANS_BASE`, `VITE_ALLOWED_ORIGINS` (comma separated), `VITE_DEFAULT_PLAN` (the file opened
-without `?schem=`; the hall in development, none in a build unless set).
+without `?schem=`; none unless set).
 
 ## Block metadata in the file
 
