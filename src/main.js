@@ -89,6 +89,7 @@ function setFile(f, { fromUrl = false } = {}) {
   $("copyLink").setAttribute("aria-disabled", String(!f.param));
   $("copyLink").title = f.param ? "Copy a link to this view: file, camera, layers and hidden parts"
     : "A file opened from disk cannot be linked: a link could not bring it back";
+  showDownloads(f);
   const s = f.schem, { counts, parts, roofCover } = s.shellOf(meta);
   shellCells = parts; hiddenCache = { key: null, set: null }; partCells.clear(); frontCache = { name: null, dir: null };
   Object.assign(info, s.info(), { shell: counts, roofCover, meta: meta !== null, parts: meta ? partsOf(meta, own ? s.partOrder : null) : [] });
@@ -1371,6 +1372,39 @@ function syncUrl(now = false) {
   if (now) write(); else urlTimer = setTimeout(write, 400);
 }
 $("copyBlock").onclick = copyBlock;
+// Download: a file opened from its address as it is hosted, and the same design in the other formats beside it (a
+// share puts the .schem and the .litematic side by side; scripts/share.mjs), each found with a HEAD request and
+// fetched only when clicked. A file from disk has none: the visitor has it.
+const DOWNLOAD_FORMATS = [".schem", ".litematic", ".nbt"];
+let downloadsFor = null;
+async function showDownloads(f) {
+  const row = $("dlBar"), list = $("dlFormats");
+  downloadsFor = f; row.hidden = true; list.replaceChildren();
+  if (!f.url) return;
+  const href = f.url.href.split(/[?#]/)[0], own = (href.match(/\.[a-z]+$/i)?.[0] ?? "").toLowerCase();
+  const stemUrl = own ? href.slice(0, -own.length) : href;
+  const found = await Promise.all([own, ...DOWNLOAD_FORMATS.filter((e) => e !== own)].map(async (ext) => {
+    if (ext === own) return { ext, url: href, bytes: f.bytes };
+    try {
+      const r = await fetch(stemUrl + ext, { method: "HEAD" });
+      // a host that answers a missing path with the page itself is not a schematic
+      return r.ok && !/text\/html/i.test(r.headers.get("content-type") ?? "") ? { ext, url: stemUrl + ext } : null;
+    } catch { return null; }
+  }));
+  if (downloadsFor !== f) return;   // another file was opened meanwhile
+  for (const d of found.filter((x) => x && x.ext)) {
+    const name = decodeURIComponent(d.url.split("/").pop());
+    const b = document.createElement("button"); b.textContent = d.ext; b.title = `Download ${name}`;
+    b.onclick = async () => {
+      try {
+        const blob = d.bytes ? new Blob([d.bytes]) : await (await fetch(d.url).then((r) => { if (!r.ok) throw new Error(`${r.status} ${r.statusText}`); return r; })).blob();
+        download(blob, name); status(`downloaded ${name}`);
+      } catch (e) { status(`${name}: ${e.message}`, "err"); }
+    };
+    list.append(b);
+  }
+  row.hidden = !list.children.length;
+}
 $("copyLink").onclick = async () => {
   if (!file?.param) { status("a file opened from disk cannot be linked: a link could not bring it back"); return; }
   syncUrl(true);

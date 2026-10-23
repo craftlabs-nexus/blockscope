@@ -187,7 +187,7 @@
 
     /* Pack progress: a bar and a line under the status while the pack is built */
     #packRow { flex: none; display: flex; flex-direction: column; gap: 3px; padding: 4px 10px 6px; border-top: 1px solid var(--line-soft); }
-    #packRow[hidden], #grid[hidden] { display: none; }
+    #packRow[hidden], #grid[hidden], #dlBar[hidden] { display: none; }
     #packBar { width: 100%; height: 6px; accent-color: var(--accent); }
     #packText { font-size: 11px; color: var(--fg-key); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .packbar { margin-top: 6px; }
@@ -408,6 +408,9 @@
             <label class="btn" for="file" title="Open a .schem, .schematic, .litematic or structure .nbt, with its .meta.json for the parts if you have it; it stays in this page, nothing is uploaded">Open…</label>
             <input id="file" class="sr" type="file" multiple accept=".schem,.schematic,.litematic,.nbt,.json" />
             <button id="copyLink" aria-disabled="true" title="Copy a link to this view: file, camera, layers and hidden parts (once a file is opened from a link)">Copy link</button>
+          </div>
+          <div class="bar" id="dlBar" hidden title="The file as it is hosted, and the same design in the other formats beside it">
+            <span class="dim">Download</span><span class="bar" id="dlFormats"></span>
           </div>
           <p class="hint">or drop a schematic (with its .meta.json for the parts), a resource pack .zip, or your modpack (folder, .mrpack, CurseForge zip) on the page</p>
           <details class="sub" id="packDetails"><summary>Resource pack <span class="sum" id="packSum"></span></summary>
