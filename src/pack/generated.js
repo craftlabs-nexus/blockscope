@@ -26,18 +26,26 @@ export async function addChests(zip, clientZip) {
   const states = { "": "copper", exposed_: "copper_exposed", weathered_: "copper_weathered", oxidized_: "copper_oxidized" };
   const uv = (x0, y0, x1, y1) => [x0 / 4, y0 / 4, x1 / 4, y1 / 4]; // entity textures are 64×64 px; model UVs are 0..16
   // 1.15+ chest texture layout: latch at (0,0); lid box w×5×14 at tex (0,0); base box w×10×14 at tex (0,19); w = 14 for
-  // a single chest, 15 for either half of a double (the half runs to the shared edge).
-  const box = (from, to, u, v, w, h, d) => ({
-    from, to,
-    faces: {
-      up: { uv: uv(u + d, v, u + d + w, v + d), texture: "#t" },
-      down: { uv: uv(u + d + w, v, u + d + 2 * w, v + d), texture: "#t" },
-      west: { uv: uv(u, v + d, u + d, v + d + h), texture: "#t" },
-      south: { uv: uv(u + d, v + d, u + d + w, v + d + h), texture: "#t" },
-      east: { uv: uv(u + d + w, v + d, u + 2 * d + w, v + d + h), texture: "#t" },
-      north: { uv: uv(u + 2 * d + w, v + d, u + 2 * d + 2 * w, v + d + h), texture: "#t" },
-    },
-  });
+  // a single chest, 15 for either half of a double (the half runs to the shared edge). Each box's faces as
+  // ModelPart.Cube maps them (its polygons' vertices and UV corners), with the chest model upright (the lid above the
+  // base, no flip): the region's first row lands at the box's bottom, so every side reads turned 180° next to a block
+  // model's UV, and the top face takes the region the cube calls UP (u + d + w). The latch-shadow notches of the lid's
+  // and base's front panels then meet at the latch, and a trapped chest's red rings the latch, on the front.
+  const box = (from, to, u, v, w, h, d) => {
+    const u0 = u, u1 = u + d, u2 = u + d + w, u3 = u + d + 2 * w, u4 = u + 2 * d + w, u5 = u + 2 * d + 2 * w;
+    const v0 = v, v1 = v + d, v2 = v + d + h;
+    return {
+      from, to,
+      faces: {
+        up: { uv: uv(u2, v1, u3, v0), texture: "#t" },
+        down: { uv: uv(u1, v0, u2, v1), texture: "#t" },
+        north: { uv: uv(u2, v2, u1, v1), texture: "#t" },
+        south: { uv: uv(u5, v2, u4, v1), texture: "#t" },
+        west: { uv: uv(u1, v2, u0, v1), texture: "#t" },
+        east: { uv: uv(u4, v2, u2, v1), texture: "#t" },
+      },
+    };
+  };
   // Model space: front (latch) at +z, i.e. facing=south. The LEFT half's partner lies at facing.getClockWise(), for
   // south that is west (-x), so the left half runs x 0..15 with its latch on the seam at x 0..1; the right half runs
   // x 1..16, latch at x 15..16 (ChestModel's boxes).
