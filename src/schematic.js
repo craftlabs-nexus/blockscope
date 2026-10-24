@@ -12,6 +12,11 @@ import { partOf, shellPart } from "./parts.js";
 
 const AIR = /^minecraft:(cave_|void_)?air$/;
 const baseId = (key) => key.replace(/\[.*$/, "");
+/** A palette key ("id[k=v,…]") as { id, props }; the id as the key spells it (null for a key that is no block). */
+export function parseBlockKey(key) {
+  const m = String(key).match(/^([^[]+)(?:\[(.*)\])?$/); if (!m) return null;
+  return { id: m[1], props: Object.fromEntries((m[2] ?? "").split(",").filter(Boolean).map((kv) => kv.split("="))) };
+}
 const num = (v) => (v && typeof v === "object" && "v" in v ? Number(v.v) : Number(v));
 
 // A roof, for a file with no shell metadata: a nearly full top layer (topFill, the share of the footprint it covers)
@@ -185,11 +190,11 @@ export class Schematic {
       const [x, y, z] = Array.from(e.Pos.v ?? e.Pos, Number);
       if (x < 0 || y < 0 || z < 0 || x >= this.width || y >= this.height || z >= this.length) continue;
       const key = this.idAt(this.index(x, y, z));
-      const m = key.match(/^([^[]+)(?:\[(.*)\])?$/); if (!m) continue;
-      const props = Object.fromEntries((m[2] ?? "").split(",").filter(Boolean).map((kv) => kv.split("=")));
+      const b = parseBlockKey(key); if (!b) continue;
+      const props = b.props;
       const text = (t) => ({ lines: Array.from(t?.messages?.v ?? t?.messages ?? [], line), color: t?.color ?? "black", glow: !!num(t?.has_glowing_text ?? 0) });
       const front = text(ft), back = text(d.back_text);
-      out.push({ x, y, z, id: m[1], facing: props.facing ?? null, rotation: props.rotation !== undefined ? Number(props.rotation) : null, ...front, waxed: !!num(d.is_waxed ?? 0), back: back.lines.some(Boolean) ? back : null });
+      out.push({ x, y, z, id: b.id, facing: props.facing ?? null, rotation: props.rotation !== undefined ? Number(props.rotation) : null, ...front, waxed: !!num(d.is_waxed ?? 0), back: back.lines.some(Boolean) ? back : null });
     }
     return out;
   }

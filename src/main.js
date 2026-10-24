@@ -17,6 +17,7 @@ import { tidyRendererPacks, switchPack, keepBaseLowest, packManager } from "./pa
 import { clear as clearStore, usage } from "./pack/store.js";
 import { resolvePlan, loadPlan, optionalJson, DEFAULT_PLAN, SCHEMATIC_EXT } from "./plans.js";
 import { createMaterials } from "./materials/panel.js";
+import { esc } from "./html.js";
 import { prepareBook } from "./materials/engine.js";
 import { BOOK_FILE } from "./materials/book.js";
 
@@ -207,11 +208,7 @@ const mats = createMaterials({
     return { lo, hi, hidden: file ? hiddenCells() : new Set(), chips };
   },
   highlight: (cells) => showMatCells(cells),
-  soloPart(name) {
-    const solo = soloed() === name;
-    hiddenPartSet.clear(); if (!solo) for (const q of info.parts) if (q.name !== name) hiddenPartSet.add(q.name);
-    renderParts(); reloadLayers(solo ? "every part" : `only ${name}`);
-  },
+  soloPart: (name) => soloPart(name),
   singleLayer(y) { layer.mode = "single"; layer.cur = y; reloadLayers(`layer ${y}`); },
   status: (t, k) => status(t, k),
   download: (blob, name) => download(blob, name),
@@ -228,28 +225,23 @@ async function packZip(name) {
 async function loadBook() {
   if (!renderer || bookPack === currentPack) return;
   const name = currentPack; bookPack = name;
+  // every step checks the pack is still the one shown: a slow read of the last pack's book never lands on this one
+  const set = (...a) => { if (name === currentPack) mats.setBook(...a); };
   try {
-    const zip = await packZip(name); if (!zip) { bookPack = null; return; }
+    const zip = await packZip(name); if (!zip) { if (bookPack === name) bookPack = null; return; }
     const f = zip.file(BOOK_FILE);
-    if (!f) { mats.setBook(null, null, "missing"); return; }
-    mats.setBook(null, null, "loading");
+    if (!f) { set(null, null, "missing"); return; }
+    set(null, null, "loading");
     const book = prepareBook(JSON.parse(await f.async("string")));
-    if (name === currentPack) mats.setBook(book, (path) => zip.file(path)?.async("blob") ?? Promise.resolve(null));
-  } catch (e) { console.warn("[blockscope] the recipe book", e); mats.setBook(null, null, "missing"); }
+    set(book, (path) => zip.file(path)?.async("blob") ?? Promise.resolve(null));
+  } catch (e) { console.warn("[blockscope] the recipe book", e); set(null, null, "missing"); }
 }
 // the blocks a materials row stands for, lit up in the view (amber, so they read apart from a part's blue)
 const matMat = new THREE.MeshBasicMaterial({ color: 0xf0c36d, transparent: true, opacity: 0.42, depthWrite: false });
 let matGhost = null;
 function showMatCells(cells) {
   if (matGhost) { markGroup.remove(matGhost); matGhost.geometry.dispose(); matGhost = null; }
-  if (cells?.length && group()) {
-    attachMarks();
-    matGhost = new THREE.InstancedMesh(new THREE.BoxGeometry(1.04, 1.04, 1.04), matMat, cells.length);
-    const m = new THREE.Matrix4();
-    cells.forEach(([x, y, z], i) => { m.makeTranslation(...cellCenter(x, y, z)); matGhost.setMatrixAt(i, m); });
-    matGhost.instanceMatrix.needsUpdate = true; matGhost.renderOrder = 9;
-    markGroup.add(matGhost);
-  }
+  if (cells?.length && group()) { attachMarks(); matGhost = cellsMesh(cells, matMat); markGroup.add(matGhost); }
   redraw();
 }
 
@@ -325,11 +317,15 @@ function showGhost(name) {
   const [lo, hi] = shownRange();
   const cells = cellsOfPart(name).filter(([, y, , sp]) => y >= lo && y <= hi && !(sp && !shell[sp]));
   if (!cells.length) return;
-  ghost = new THREE.InstancedMesh(new THREE.BoxGeometry(1.04, 1.04, 1.04), ghostMat, cells.length);
-  const m = new THREE.Matrix4();
-  cells.forEach(([x, y, z], i) => { m.makeTranslation(...cellCenter(x, y, z)); ghost.setMatrixAt(i, m); });
-  ghost.instanceMatrix.needsUpdate = true; ghost.renderOrder = 9;
+  ghost = cellsMesh(cells, ghostMat);
   markGroup.add(ghost); redraw();
+}
+/** A translucent box on each of `cells` (file coordinates), one instanced mesh: a part's ghost, a material's blocks. */
+function cellsMesh(cells, material) {
+  const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1.04, 1.04, 1.04), material, cells.length), m = new THREE.Matrix4();
+  cells.forEach(([x, y, z], i) => { m.makeTranslation(...cellCenter(x, y, z)); mesh.setMatrixAt(i, m); });
+  mesh.instanceMatrix.needsUpdate = true; mesh.renderOrder = 9;
+  return mesh;
 }
 function hideGhost() { if (ghost) { markGroup.remove(ghost); ghost.geometry.dispose(); ghost = null; redraw(); } }
 
@@ -395,7 +391,6 @@ async function readPackReport() {
     if (r) { packReport = { ...r, name: currentPack, cached: true }; renderPackInfo(); }
   } catch {}
 }
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 function renderPackInfo() {
   const r = packReport, el = $("packInfo");
   const missing = r && !r.error ? r.missing?.length ?? 0 : 0;
@@ -864,6 +859,12 @@ function showShellState() {
 // again shows all.
 const partRows = new Map();
 const soloed = () => { const parts = info.parts; const shown = parts.filter((p) => !hiddenPartSet.has(p.name)); return parts.length > 1 && shown.length === 1 ? shown[0].name : null; };
+/** Shows only that part, or every part again when it is the one shown alone (the Parts list's solo, the materials list's). */
+function soloPart(name) {
+  const solo = soloed() === name;
+  hiddenPartSet.clear(); if (!solo) for (const q of info.parts) if (q.name !== name) hiddenPartSet.add(q.name);
+  renderParts(); reloadLayers(solo ? "every part" : `only ${name}`);
+}
 function renderParts() {
   const list = $("parts"), parts = info.parts;
   $("partsGrp").style.display = parts.length ? "" : "none";
@@ -882,7 +883,7 @@ function renderParts() {
     const cnt = document.createElement("span"); cnt.className = "cnt"; cnt.textContent = String(p.count);
     const only = document.createElement("button"); only.className = "solo"; only.textContent = "solo"; only.setAttribute("aria-pressed", String(solo === p.name)); only.title = solo === p.name ? "Show every part again" : `Show only ${p.name}`;
     eye.onclick = () => { if (hiddenPartSet.has(p.name)) hiddenPartSet.delete(p.name); else hiddenPartSet.add(p.name); renderParts(); reloadLayers(`${hiddenPartSet.has(p.name) ? "without" : "with"} ${p.name}`); };
-    only.onclick = () => { hiddenPartSet.clear(); if (solo !== p.name) for (const q of parts) if (q.name !== p.name) hiddenPartSet.add(q.name); renderParts(); reloadLayers(solo === p.name ? "every part" : `only ${p.name}`); };
+    only.onclick = () => soloPart(p.name);
     nm.onclick = () => flyToPart(p.name);
     row.onmouseenter = () => showGhost(p.name); row.onmouseleave = hideGhost;
     row.append(eye, nm, cnt, only); list.append(row); partRows.set(p.name, row);

@@ -18,7 +18,7 @@ import { sha256Text } from "./sources.js";
 import { buildBook, BOOK_FILE } from "../materials/book.js";
 
 /** Bump when what the builder writes changes, so every cached pack is rebuilt. */
-export const GENERATOR = 4;   // 2: the materials list's recipe book and the item textures; 4: chests mapped as the game maps them
+export const GENERATOR = 6;   // 2: the materials list's recipe book and the item textures; 4: chests mapped as the game maps them; 6: the recipe book's crops, machines and sets
 export const PACK_PREFIX = "blockscope:";
 const MODRINTH_UA = "craftlabs-nexus/blockscope/0.1 (https://github.com/craftlabs-nexus/blockscope)";
 // what of the client jar goes in: the block assets and the textures block models and the renderer read (entity

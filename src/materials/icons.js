@@ -1,7 +1,12 @@
 // Item icons for the materials list, drawn in the page from the pack's own textures: an item's flat icon as it is, a
 // block as a small isometric cube (top and two shaded sides), the way the game's inventory shows it. The textures are
 // read from the merged pack (the renderer's copy), each once; the icons are kept as data URLs for the page's life.
-const SIZE = 32;
+// They are drawn at four times the size they show (a texture pixel is a 4 × 4 square, edges stay sharp) and scaled
+// down smoothly by the browser, so they hold their shape at any screen density.
+const SIZE = 64;
+// the cube as the game's inventory draws a block (turned 45°, tipped 30°): a top whose width is twice its height, and
+// sides a little taller than the top (cos 30° to sin 45° · sin 30°); 56 wide, 28 + 34 tall, in the 64 square
+const W = 56, TOP = W / 2, SIDE = Math.round(W * 0.6124), X0 = (SIZE - W) / 2, Y0 = Math.floor((SIZE - TOP - SIDE) / 2);
 // textures the game tints by biome or colour: drawn grey in the jar, given their usual colour here
 const TINTS = [
   [/block\/(grass_block_top|short_grass|tall_grass_(top|bottom)|fern|large_fern_(top|bottom)|grass_block_side_overlay)$/, "#7cbd6b"],
@@ -52,18 +57,23 @@ async function draw(spec, readTexture) {
   }
   const [top, left, right] = await Promise.all(spec.slice(1, 4).map((r) => (r ? texture(r, readTexture) : null)));
   if (!top && !left && !right) return null;
-  // three faces of a cube seen from above: each a texture square under an affine map (a, b, c, d, e, f on a 32-unit
-  // canvas, a 16-pixel texture side spanning 16 units), drawn on a layer of its own so a side's shade stays on it
-  const faces = [[left ?? top, [1, 0.5, 0, 1, 0, 8], 0.22], [right ?? left ?? top, [1, -0.5, 0, 1, 16, 16], 0.4], [top ?? left, [1, 0.5, -1, 0.5, 16, 0], 0]];
-  const k = SIZE / 32;
-  for (const [t, [a, b, cc, d, e, f], shade] of faces) {
+  // the corners: the top's back (T), left (L), right (R) and front (C) corners; the sides hang SIDE below L, C and R
+  const T = [X0 + W / 2, Y0], L = [X0, Y0 + TOP / 2], R = [X0 + W, Y0 + TOP / 2], C = [X0 + W / 2, Y0 + TOP];
+  const sub = (a, b) => [a[0] - b[0], a[1] - b[1]], down = [0, SIDE];
+  // each face: a texture square mapped onto its parallelogram (origin, the texture's u and v edges), a shade as the
+  // game lights a block in the inventory (the left side 80 %, the right 60 %), and a hair larger than the face so no
+  // background shows through the seams
+  const faces = [[left ?? top, L, sub(C, L), down, 0.2], [right ?? left ?? top, C, sub(R, C), down, 0.4], [top ?? left, T, sub(R, T), sub(L, T), 0]];
+  const grow = 0.02;
+  for (const [t, o, u, v, shade] of faces) {
     if (!t) continue;
-    const o = document.createElement("canvas"); o.width = o.height = SIZE;
-    const og = o.getContext("2d"); og.imageSmoothingEnabled = false;
-    og.setTransform((a * k * 16) / t.width, (b * k * 16) / t.width, (cc * k * 16) / t.height, (d * k * 16) / t.height, e * k, f * k);
-    og.drawImage(t, 0, 0);
-    if (shade) { og.globalCompositeOperation = "source-atop"; og.fillStyle = `rgba(0,0,0,${shade})`; og.fillRect(0, 0, t.width, t.height); }
-    g.drawImage(o, 0, 0);
+    const layer = document.createElement("canvas"); layer.width = layer.height = SIZE;
+    const lg = layer.getContext("2d"); lg.imageSmoothingEnabled = false;
+    const k = 1 + grow, ox = o[0] - (u[0] + v[0]) * grow / 2, oy = o[1] - (u[1] + v[1]) * grow / 2;
+    lg.setTransform((u[0] * k) / t.width, (u[1] * k) / t.width, (v[0] * k) / t.height, (v[1] * k) / t.height, ox, oy);
+    lg.drawImage(t, 0, 0);
+    if (shade) { lg.globalCompositeOperation = "source-atop"; lg.fillStyle = `rgba(0,0,0,${shade})`; lg.fillRect(0, 0, t.width, t.height); }
+    g.drawImage(layer, 0, 0);
   }
   return c.toDataURL();
 }

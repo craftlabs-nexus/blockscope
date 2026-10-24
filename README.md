@@ -51,15 +51,19 @@ one for the Roof toggle and one for Inspect.
   unless the list is pinned. The panel's group shows the biggest items; List (<kbd>M</kbd>) opens the sheet. A block
   counts as the item it is placed from (a wall sign is a sign, dust is redstone, a door or bed is one item, a double
   slab two, a water cauldron a cauldron and a bucket, a crop its seed from the block's loot table); water and lava
-  sources and blocks with no item found are listed apart, never in the totals; a sign adds its dye, glow ink and wax,
+  sources, waterlogged blocks and blocks with no item found are listed apart, never in the totals; a sign adds its
+  dye, glow ink and wax,
   a framed drawer its three materials and one framing table. **Placed** lists those items, **Gather** breaks crafted
   ones down to what a person goes and gets (ingots, dyes, planks, stone, smelted things), **Raw** down to what is
   mined, grown or dropped. The recipes are the jars' own: the pack builder reads the client jar's and the mods'
   recipes, tags, names and item models while it builds the pack and writes them into it as
   `blockscope-materials.json` (`src/materials/book.js`), so they always match the pack; Fabric's conventional `c:`
   tags, which no fetched jar defines, fall back to the vanilla items they stand for. One recipe per item is chosen by
-  cost (the stonecutter over the table, the table over the furnace); what a person gathers rather than makes
-  (cobblestone, andesite, logs, ingots) is never broken down. **Have**: a number, or `2s`, `1sb`, `3b` (stacks,
+  cost (the stonecutter over the table, the table over the furnace; a vanilla item the vanilla way when there is
+  one; never through what only a mod's machine makes); what a person gathers rather than makes (cobblestone,
+  andesite, logs, ingots, what a grown crop drops, what a mod's storage block unpacks into) is never broken down. An
+  ingredient any of several items will do (any planks) counts as the one the build uses most, on its row.
+  **Have**: a number, or `2s`, `1sb`, `3b` (stacks,
   shulker boxes, 9-to-1 blocks), on any row, including a step in the middle of a recipe in the Tree tab (two iron
   blocks in hand for four anvils: 90 fewer ingots); a tick means all of it. Demand flows down the recipes in dependency
   order and each craft is rounded up to whole crafts, the spare kept. ▸ on a row makes that item from its ingredients

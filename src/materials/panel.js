@@ -2,17 +2,17 @@
 // down to raw materials, with what the person already has taken off. The scope is the view's (the layers, the shell
 // and the parts shown) unless it is pinned. What the person has, ticked off and broken down by hand is kept per file
 // (by its hash) in this browser; the list's settings are kept for every file.
-import { countScope, plan, leavesOf, totalsOf, nameOf, packText, parseHave, noteOf, recipeOf, memberOf, paletteItems, blockItems, HOW, SHULKER, INVENTORY } from "./engine.js";
+import { countScope, planGroups, totalsOf, nameOf, altText, packText, parseHave, noteOf, recipeOf, paletteItems, blockItems, lookupOf, wouldLoop, fmt, HOW, SHULKER, INVENTORY } from "./engine.js";
 import { iconUrl, resetIcons } from "./icons.js";
 import { matId } from "../framed.js";
 import { partOf } from "../parts.js";
+import { esc } from "../html.js";
 
 const PREFS = "blockscope.mats";
 const fileKey = (hash) => `blockscope.mats.${hash}`;
+const EMPTY = () => ({ have: {}, done: {}, open: {}, pick: {} });
 const load = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k) ?? "null"); return v && typeof v === "object" ? { ...d, ...v } : { ...d }; } catch { return { ...d }; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
-const fmt = (n) => Math.round(n).toLocaleString("en-US");
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const PRESET_NAME = { placed: "as placed", gather: "to gather", raw: "raw materials" };
 const FLUID_NOTE = { "minecraft:water_bucket": "a bucket per source block, or two buckets and an infinite source", "minecraft:lava_bucket": "a bucket per source block" };
 const HIGHLIGHT_MAX = 60000;
@@ -24,16 +24,17 @@ const HIGHLIGHT_MAX = 60000;
 export function createMaterials(host) {
   const { $ } = host;
   const prefs = load(PREFS, { preset: "gather", units: "stacks", compact: false, hideDone: false, group: "none", tab: "list", sheet: false });
-  let fs = { have: {}, done: {}, open: {}, pick: {} }, fsKey = null;
-  let book = null, has = () => true, lookup = has, readTexture = null, bookState = "none";   // none | loading | ready | missing
-  let pinned = null, result = null, timer = 0, partCache = { schem: null, meta: null, names: null, idx: null }, framedCache = { schem: null, cells: [] };
+  let fs = EMPTY(), fsKey = null;
+  let book = null, lookup = null, readTexture = null, bookState = "none";   // none | loading | ready | missing
+  let pinned = null, result = null, timer = 0, stale = false;
+  let partCache = { schem: null }, framedCache = { schem: null, cells: [] };
   const persist = () => { save(PREFS, prefs); if (fsKey) save(fsKey, fs); };
   // the rollup in effect: as placed until the recipes have arrived
   const rollup = () => (book ? prefs.preset : "placed");
 
   // ---- working it out -----------------------------------------------------------------------------------------------
   function groupFn(schem) {
-    if (prefs.group === "layer") return { of: (i) => Math.floor(i / schem.perLayer), order: (a, b) => a - b, label: (y) => `y ${host.worldY(y)}` };
+    if (prefs.group === "layer") return { of: (i) => Math.floor(i / schem.perLayer), label: (y) => `y ${host.worldY(y)}` };
     if (prefs.group !== "part") return null;
     const meta = host.meta(); if (!meta) return null;
     if (partCache.schem !== schem || partCache.meta !== meta) {
@@ -43,55 +44,70 @@ export function createMaterials(host) {
       partCache = { schem, meta, names, idx };
     }
     const { names, idx } = partCache, last = names.length;
-    return { of: (i) => (idx[i] < 0 ? last : idx[i]), order: (a, b) => a - b, label: (g) => names[g] ?? "no part", partName: (g) => names[g] ?? null };
+    return { of: (i) => (idx[i] < 0 ? last : idx[i]), label: (g) => names[g] ?? "no part", partName: (g) => names[g] ?? null };
   }
   function compute() {
     const f = host.file(); if (!f?.schem) { result = null; return; }
     const schem = f.schem, sc = pinned ?? host.scope(), grouping = groupFn(schem);
     if (framedCache.schem !== schem) framedCache = { schem, cells: schem.framedCells() };
-    const groups = countScope(schem, { lo: sc.lo, hi: sc.hi, hidden: sc.hidden, has, lookup, groupOf: grouping?.of ?? null, framed: framedCache.cells, matItem: (t) => { const id = matId(t); return id && has(id) ? id : null; } });
+    const groups = countScope(schem, { lo: sc.lo, hi: sc.hi, hidden: sc.hidden, lookup, groupOf: grouping?.of ?? null, framed: framedCache.cells, matItem: (t) => { const id = matId(t); return id && (!book || id in book.items) ? id : null; } });
     const prefer = new Map(), fluids = new Map(), unknown = new Map(), extraIds = new Set();
-    let blocks = 0;
+    let blocks = 0, wet = 0;
     for (const g of groups.values()) {
-      blocks += g.blocks;
+      blocks += g.blocks; wet += g.wet;
       for (const [k, n] of g.placed) prefer.set(k, (prefer.get(k) ?? 0) + n);
       for (const [k, n] of g.fluids) fluids.set(k, (fluids.get(k) ?? 0) + n);
       for (const [k, n] of g.unknown) unknown.set(k, (unknown.get(k) ?? 0) + n);
       for (const e of g.extras) extraIds.add(e.item);
     }
-    const opts = { preset: rollup(), open: fs.open, pick: fs.pick, done: fs.done, prefer };
     const demandOf = (g) => [...[...g.placed].map(([item, n]) => ({ item, n, from: item })), ...g.extras];
-    // the whole scope at once (the tree, the totals, the panel's top rows), then per group with what the person has
-    // handed out in the groups' order: the bottom layer or the first part takes it first
-    const all = plan(book, [...groups.values()].flatMap(demandOf), { ...opts, have: fs.have });
-    const sections = [];
-    if (grouping) {
-      const left = { ...fs.have };
-      for (const key of [...groups.keys()].sort(grouping.order)) {
-        const g = groups.get(key), p = plan(book, demandOf(g), { ...opts, have: left });
-        for (const n of p.nodes.values()) if (!fs.done[n.id] && left[n.id]) left[n.id] = Math.max(0, left[n.id] - n.have);
-        sections.push({ key, label: grouping.label(key), part: grouping.partName?.(key) ?? null, layer: prefs.group === "layer" ? key : null, blocks: g.blocks, plan: p, leaves: leavesOf(p) });
-      }
-    } else if (prefs.group === "mod") {
+    // in groups, in their order (the bottom layer, the first part takes what the person has first); the whole scope
+    // at once for the tree and the hover
+    const keys = grouping ? [...groups.keys()].sort((a, b) => a - b) : [...groups.keys()];
+    const planned = planGroups(book, keys.map((key) => ({ key, demand: demandOf(groups.get(key)) })), { preset: rollup(), open: fs.open, pick: fs.pick, done: fs.done, have: fs.have, prefer });
+    let sections;
+    if (grouping) sections = planned.sections.map((s) => ({ ...s, label: grouping.label(s.key), part: grouping.partName?.(s.key) ?? null, layer: prefs.group === "layer" ? s.key : null, blocks: groups.get(s.key).blocks }));
+    else if (prefs.group === "mod") {
       const byNs = new Map();
-      for (const n of leavesOf(all)) { const ns = n.id.startsWith("#") ? "minecraft" : n.id.split(":")[0]; (byNs.get(ns) ?? byNs.set(ns, []).get(ns)).push(n); }
-      for (const ns of [...byNs.keys()].sort((a, b) => (a === "minecraft" ? -1 : b === "minecraft" ? 1 : a < b ? -1 : 1))) sections.push({ key: ns, label: ns === "minecraft" ? "Minecraft" : ns, plan: all, leaves: byNs.get(ns), blocks: null });
-    } else sections.push({ key: "all", label: null, plan: all, leaves: leavesOf(all), blocks });
-    const leaves = leavesOf(all);
-    result = { schem, scope: sc, groups, sections, all, leaves, fluids, unknown, blocks, prefer, extraIds, totals: totalsOf(leaves), grossTotals: totalsOf(leaves, "gross"), grouping };
+      for (const n of planned.sections[0]?.leaves ?? []) { const ns = n.id.split(":")[0]; (byNs.get(ns) ?? byNs.set(ns, []).get(ns)).push(n); }
+      sections = [...byNs.keys()].sort((a, b) => (a === "minecraft" ? -1 : b === "minecraft" ? 1 : a < b ? -1 : 1)).map((ns) => ({ key: ns, label: ns === "minecraft" ? "Minecraft" : ns, leaves: byNs.get(ns), blocks: null }));
+    } else sections = [{ key: "all", label: null, leaves: planned.sections[0]?.leaves ?? [], blocks }];
+    // every item once, summed over the groups (the panel's top rows)
+    const merged = new Map();
+    for (const n of planned.sections.flatMap((s) => s.leaves)) { let m = merged.get(n.id); if (!m) merged.set(n.id, (m = { ...n, net: 0, have: 0, gross: 0 })); m.net += n.net; m.have += n.have; m.gross += n.gross; }
+    result = { schem, scope: sc, sections, all: planned.all, leaves: [...merged.values()].sort((a, b) => b.net - a.net || b.gross - a.gross), fluids, wet, unknown, blocks, prefer, extraIds, totals: planned.totals, grossTotals: planned.gross, grouping };
   }
-  const recompute = () => { compute(); render(); };
+  // a redraw while the person is typing in a Have box waits for them to leave it, so a layer change or the recipes
+  // arriving never throw away what they typed
+  const typingHave = () => document.activeElement?.matches?.("#matsList input.have") ?? false;
+  function recompute() { compute(); render(); }
   const soon = () => { clearTimeout(timer); timer = setTimeout(recompute, 120); };
 
   // ---- the panel's group ------------------------------------------------------------------------------------------
+  function renderControls() {
+    // both rollup strips (the group's and the sheet's) show the rollup in effect; Gather and Raw wait for the recipes
+    for (const id of ["matsPreset", "matsPreset2"]) for (const b of $(id).querySelectorAll("button[data-v]")) {
+      b.setAttribute("aria-pressed", String(b.dataset.v === rollup()));
+      b.disabled = b.dataset.v !== "placed" && bookState !== "ready";
+      b.title = b.disabled ? `${b.dataset.v === "gather" ? "Gather" : "Raw"} needs the recipes, which come with the pack${bookState === "missing" ? ": rebuild it (File, Resource pack)" : ""}` : b.dataset.title ?? b.title;
+    }
+    for (const b of $("matsUnits").querySelectorAll("button[data-v]")) b.setAttribute("aria-pressed", String(b.dataset.v === prefs.units));
+    $("matsCompact").setAttribute("aria-pressed", String(prefs.compact)); $("matsHideDone").setAttribute("aria-pressed", String(prefs.hideDone));
+    $("matsTabList").setAttribute("aria-pressed", String(prefs.tab === "list")); $("matsTabTree").setAttribute("aria-pressed", String(prefs.tab === "tree"));
+    $("matsPin").setAttribute("aria-pressed", String(!!pinned));
+    $("matsOpen").setAttribute("aria-pressed", String(prefs.sheet));
+    $("matsGroup").value = prefs.group; $("matsGroup").disabled = prefs.tab === "tree";
+    $("matsGroup").querySelector('[value="part"]').disabled = !host.meta() || !host.parts().length;
+    $("matsNote").textContent = bookState === "ready" ? "" : bookState === "loading" ? "reading the recipes…" : bookState === "missing" ? "no recipes in this pack: rebuild it (File, Resource pack) for Gather and Raw" : "the recipes come with the pack";
+  }
   function renderGroup() {
     const r = result, sum = $("matsSum"), top = $("matsTop");
     if (!r) { sum.textContent = ""; top.innerHTML = `<p class="empty">Open a schematic to see what it takes.</p>`; $("matsGrpScope").textContent = ""; return; }
-    const t = r.totals, got = r.grossTotals.items - t.items;
+    const t = r.totals, got = r.grossTotals.items - t.items, firsts = r.leaves;
     sum.textContent = r.leaves.length ? `${fmt(t.items)} · ${t.kinds} kinds${got ? ` · ${fmt(got)} in hand` : ""}` : "nothing";
     $("matsGrpScope").innerHTML = chipsHtml();
-    top.innerHTML = r.leaves.length ? r.leaves.slice(0, 6).map((n) => `<div class="mmini" data-id="${esc(n.id)}" data-g="all" title="${esc(nameOf(n.id, book))}: ${fmt(n.net)} to get${n.have ? ` (${fmt(n.have)} in hand)` : ""}"><img class="ic" alt="" data-ic="${esc(n.id)}"><span class="nm">${esc(nameOf(n.id, book))}</span><span class="c">${fmt(n.net)}</span><span class="pk">${esc(packText(n.net, n.id, { units: "stacks" }))}</span></div>`).join("") +
-      (r.leaves.length > 6 ? `<div class="mmini more" data-more="1"><span></span><span class="nm">${r.leaves.length - 6} more kinds…</span><span></span><span></span></div>` : "")
+    top.innerHTML = firsts.length ? firsts.slice(0, 6).map((n) => `<div class="mmini" data-id="${esc(n.id)}" data-g="all" title="${esc(nameOf(n.id, book))}: ${fmt(n.net)} to get${n.have ? ` (${fmt(n.have)} in hand)` : ""}"><img class="ic" alt="" data-ic="${esc(n.id)}"><span class="nm">${esc(nameOf(n.id, book))}</span><span class="c">${fmt(n.net)}</span><span class="pk">${esc(packText(n.net, n.id, { units: "stacks" }))}</span></div>`).join("") +
+      (firsts.length > 6 ? `<div class="mmini more" data-more="1"><span></span><span class="nm">${firsts.length - 6} more kinds…</span><span></span><span></span></div>` : "")
       : `<p class="empty">No blocks in view.</p>`;
     fillIcons(top);
   }
@@ -103,21 +119,22 @@ export function createMaterials(host) {
   // ---- the sheet ----------------------------------------------------------------------------------------------------
   const HEAD = `<div class="mh"><span></span><span></span><span>Item</span><span class="r" title="Still to get: needed less what you have">Need</span><span class="r hv" title="What you have: a number, or 2s (stacks), 1sb (shulker boxes), 3b (9-to-1 blocks)">Have</span><span class="r pk">Packed</span><span title="Ticked: you have all of it">✓</span></div>`;
   function rowHtml(n, { group = "all", depth = 0, forQty = null, tree = false } = {}) {
-    const id = n.id, name = nameOf(id, book), real = id.startsWith("#") ? memberOf(book, id, result.prefer) : id;
-    const recipe = real && recipeOf(book, real, fs.pick), canBreak = !!recipe && bookState === "ready";
-    const ns = id.startsWith("#") || id.startsWith("minecraft:") ? "" : id.split(":")[0];
-    const note = noteOf(book, id, n, { preset: rollup() });
+    const id = n.id, name = nameOf(id, book);
+    const recipe = recipeOf(book, id, fs.pick), canBreak = !!recipe && bookState === "ready";
+    const ns = id.startsWith("minecraft:") ? "" : id.split(":")[0];
+    const note = noteOf(book, id, n, { preset: rollup() }), alt = altText(book, n);
     const done = !!fs.done[id], short = n.have > 0 && n.net > 0;
     const how = n.broken && recipe ? `<span class="via">${esc(viaText(recipe, n))}</span>` : "";
-    const pick = tree && n.broken && (book?.recipes?.[real]?.length ?? 0) > 1 ? recipeSelect(real) : "";
+    const pick = tree && n.broken && (book?.recipes?.[id]?.length ?? 0) > 1 ? recipeSelect(id) : "";
     const tg = (tree || !n.broken) && canBreak ? `<button class="tg" data-tg="${esc(id)}" title="${n.broken ? `Get ${esc(name)} as it is instead of making it` : `Make ${esc(name)}: list what it is made of instead`}">${n.broken ? "&#9662;" : "&#9656;"}</button>` : `<span class="tg"></span>`;
     const haveVal = fs.have[id] ? fmt(fs.have[id]) : "";
+    const packed = packText(done ? n.gross : n.net, id, { units: prefs.units, compact: prefs.compact, book });
     return `<div class="mrow${done ? " done" : ""}${n.broken ? " made" : ""}" data-id="${esc(id)}" data-g="${esc(String(group))}" style="--d:${depth}">` +
       `${tg}<img class="ic" alt="" data-ic="${esc(id)}">` +
-      `<span class="nm" title="${esc(`${name}${ns ? ` (${ns})` : ""}${real && real !== id ? `, as ${nameOf(real, book)}` : ""}: ${fmt(n.gross)} needed in all${n.have ? `, ${fmt(n.have)} in hand` : ""}${n.spare ? `, ${fmt(n.spare)} spare from whole crafts` : ""}`)}">${esc(name)}${ns ? `<span class="ns">${esc(ns)}</span>` : ""}${forQty !== null ? `<span class="for">${fmt(forQty)} for this</span>` : ""}${how}${pick}${!n.broken && note ? `<span class="note">${esc(note)}</span>` : ""}</span>` +
+      `<span class="nm" title="${esc(`${name}${ns ? ` (${ns})` : ""}${alt ? `, ${alt}` : ""}: ${fmt(n.gross)} needed in all${n.have ? `, ${fmt(n.have)} in hand` : ""}${n.spare ? `, ${fmt(n.spare)} spare from whole crafts` : ""}`)}">${esc(name)}${ns ? `<span class="ns">${esc(ns)}</span>` : ""}${forQty !== null ? `<span class="for">${fmt(forQty)} for this</span>` : ""}${how}${pick}${alt && !n.broken ? `<span class="via">${esc(alt)}</span>` : ""}${!n.broken && note ? `<span class="note">${esc(note)}</span>` : ""}</span>` +
       `<span class="need${short ? " short" : ""}">${done ? "✓" : fmt(n.net)}</span>` +
       `<input class="have" data-have="${esc(id)}" value="${haveVal}" placeholder="–" inputmode="text" autocomplete="off" spellcheck="false" aria-label="have of ${esc(name)}"${done ? " disabled" : ""}>` +
-      `<span class="pk">${esc(packText(done ? n.gross : n.net, id, { units: prefs.units, compact: prefs.compact, book }))}</span>` +
+      `<span class="pk" title="${esc(packed)}">${esc(packed)}</span>` +
       `<input type="checkbox" class="got" data-done="${esc(id)}" aria-label="have all of ${esc(name)}"${done ? " checked" : ""}></div>`;
   }
   function viaText(recipe, n) {
@@ -129,20 +146,11 @@ export function createMaterials(host) {
     return `<select class="rc" data-pick="${esc(id)}" title="Which recipe">${list.map((r, i) => `<option value="${i}"${i === cur ? " selected" : ""}>${esc(`${HOW[r[0]] ?? r[0]}: ${r[2].map(([k, c]) => `${c > 1 ? `${c} ` : ""}${nameOf(k, book)}`).join(" + ")}${r[1] > 1 ? ` → ${r[1]}` : ""}`)}</option>`).join("")}</select>`;
   }
   const show = (n, q) => (!q || nameOf(n.id, book).toLowerCase().includes(q) || n.id.includes(q)) && !(prefs.hideDone && (fs.done[n.id] || n.net === 0));
+  const plainRow = (icon, name, n, note = "", cls = "") => `<div class="mrow plain"><span class="tg"></span>${icon}<span class="nm${cls}">${esc(name)}${note ? `<span class="note">${esc(note)}</span>` : ""}</span><span class="need">${fmt(n)}</span><span></span><span class="pk"></span><span></span></div>`;
 
   function renderSheet() {
     const r = result, list = $("matsList");
-    for (const [id, v] of [["matsPreset", prefs.preset], ["matsUnits", prefs.units]]) for (const b of $(id).querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.v === v));
-    for (const b of $("matsPreset2").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.v === prefs.preset));
-    for (const b of $("matsPreset").querySelectorAll("button, [data-v]")) if (b.dataset.v !== "placed") b.disabled = bookState !== "ready";
-    for (const b of $("matsPreset2").querySelectorAll("button")) if (b.dataset.v !== "placed") b.disabled = bookState !== "ready";
-    $("matsCompact").setAttribute("aria-pressed", String(prefs.compact)); $("matsHideDone").setAttribute("aria-pressed", String(prefs.hideDone));
-    $("matsTabList").setAttribute("aria-pressed", String(prefs.tab === "list")); $("matsTabTree").setAttribute("aria-pressed", String(prefs.tab === "tree"));
-    $("matsPin").setAttribute("aria-pressed", String(!!pinned));
-    $("matsGroup").value = prefs.group; $("matsGroup").disabled = prefs.tab === "tree";
-    $("matsGroup").querySelector('[value="part"]').disabled = !host.meta() || !host.parts().length;
     $("matsScope").innerHTML = chipsHtml();
-    $("matsNote").textContent = bookState === "ready" ? "" : bookState === "loading" ? "reading the recipes…" : bookState === "missing" ? "no recipes in this pack: rebuild it (File, Resource pack) for Gather and Raw" : "recipes come with the pack";
     if (!r) { list.innerHTML = `<p class="empty">Open a schematic to see what it takes.</p>`; $("matsTotals").textContent = ""; return; }
     const t = r.totals, g = r.grossTotals, got = g.items - t.items;
     $("matsTotals").innerHTML = `<span><b>${fmt(r.blocks)}</b> blocks</span><span><b>${fmt(t.items)}</b> ${got ? "to get" : "items"} · <b>${t.kinds}</b> kinds</span><span><b>${fmt(t.stacks)}</b> stacks</span><span title="${SHULKER} stacks a box"><b>${t.shulkers.toFixed(1)}</b> shulker boxes</span><span title="${INVENTORY} slots an inventory"><b>${t.trips.toFixed(1)}</b> inventories</span>${got ? `<span class="ok"><b>${fmt(got)}</b> of ${fmt(g.items)} in hand</span>` : ""}`;
@@ -158,15 +166,18 @@ export function createMaterials(host) {
         if (s.extra && !s.leaves.length) continue;
         const rows = s.leaves.filter((n) => show(n, q));
         if (s.label !== null) {
-          const act = s.part ? `<button class="act" data-solo="${esc(s.part)}" title="Show only this part in the view">solo</button>` : s.layer !== null ? `<button class="act" data-layer="${s.layer}" title="Show only this layer in the view">single</button>` : "";
-          const tt = totalsOf(s.leaves);
-          html += `<div class="msec"><span class="t">${esc(s.label)}</span><span class="c">${s.blocks !== null ? `${fmt(s.blocks)} blocks · ` : ""}${fmt(tt.items)} items</span>${act}</div>`;
+          const act = s.part ? `<button class="act" data-solo="${esc(s.part)}" title="Show only this part in the view">solo</button>` : s.layer !== null && s.layer !== undefined ? `<button class="act" data-layer="${s.layer}" title="Show only this layer in the view">single</button>` : "";
+          html += `<div class="msec"><span class="t">${esc(s.label)}</span><span class="c">${s.blocks !== null ? `${fmt(s.blocks)} blocks · ` : ""}${fmt(totalsOf(s.leaves).items)} items</span>${act}</div>`;
         }
         if (!rows.length) { if (s.label === null) html += `<p class="empty">${q ? "Nothing matches." : prefs.hideDone ? "You have everything on this list." : "No blocks in view."}</p>`; continue; }
         html += HEAD + rows.map((n) => rowHtml(n, { group: s.key })).join("");
       }
-      if (r.fluids.size) html += `<div class="msec"><span class="t">Fluids</span><span class="c">not in the totals</span></div>` + [...r.fluids].map(([id, n]) => `<div class="mrow plain"><span class="tg"></span><img class="ic" alt="" data-ic="${esc(id)}"><span class="nm">${esc(nameOf(id, book).replace(/ Bucket$/, ""))} source blocks<span class="note">${esc(FLUID_NOTE[id] ?? "")}</span></span><span class="need">${fmt(n)}</span><span></span><span class="pk"></span><span></span></div>`).join("");
-      if (r.unknown.size) html += `<div class="msec warn"><span class="t">No item found</span><span class="c">not in the totals</span></div>` + [...r.unknown].sort((a, b) => b[1] - a[1]).map(([id, n]) => `<div class="mrow plain"><span class="tg"></span><span class="ic"></span><span class="nm mono" title="No item places this block, as far as the list can tell">${esc(id)}</span><span class="need">${fmt(n)}</span><span></span><span class="pk"></span><span></span></div>`).join("");
+      if (r.fluids.size || r.wet) {
+        html += `<div class="msec"><span class="t">Fluids</span><span class="c">not in the totals</span></div>` +
+          [...r.fluids].map(([id, n]) => plainRow(`<img class="ic" alt="" data-ic="${esc(id)}">`, `${nameOf(id, book).replace(/ Bucket$/, "")} source blocks`, n, FLUID_NOTE[id] ?? "")).join("") +
+          (r.wet ? plainRow(`<img class="ic" alt="" data-ic="minecraft:water_bucket">`, "Waterlogged blocks", r.wet, "a water bucket each, or water placed into them") : "");
+      }
+      if (r.unknown.size) html += `<div class="msec warn"><span class="t">No item found</span><span class="c">not in the totals</span></div>` + [...r.unknown].sort((a, b) => b[1] - a[1]).map(([id, n]) => plainRow(`<span class="ic"></span>`, id, n, "", " mono")).join("");
     }
     list.innerHTML = html;
     fillIcons(list);
@@ -176,35 +187,41 @@ export function createMaterials(host) {
     // a root is what the blocks are placed from (and a sign's dye or wax); its ingredients follow it while it is made
     const roots = [...p.nodes.values()].filter((n) => r.prefer.has(n.id) || r.extraIds.has(n.id)).sort((a, b) => b.gross - a.gross);
     // "for this": what this branch alone takes (its own whole crafts), where the row's Need is the item's total
-    const walk = (n, depth, forQty, path, qty) => {
+    const walk = (n, depth, forQty, seen, qty) => {
       out.push(rowHtml(n, { depth, forQty, tree: true }));
       if (!n.broken || !n.crafts || depth > 8 || qty <= 0) return;
       const crafts = Math.ceil(qty / n.recipe[1]);
-      for (const [k, c] of n.recipe[2]) { const child = p.nodes.get(k); if (child && !path.has(k)) walk(child, depth + 1, crafts * c, new Set([...path, k]), crafts * c); }
+      for (const [k, c] of n.recipe[2]) { const child = p.nodes.get(childId(k, p)); if (child && !seen.has(child.id)) walk(child, depth + 1, crafts * c, new Set([...seen, child.id]), crafts * c); }
     };
     for (const n of roots) if (!q || subtreeMatches(n, q, p, new Set())) walk(n, 0, null, new Set([n.id]), n.net);
     return out.length ? HEAD + out.join("") : `<p class="empty">${q ? "Nothing matches." : "No blocks in view."}</p>`;
   }
+  // a recipe's ingredient as the plan counts it: a set (any planks) is the member standing in for it
+  const childId = (k, p) => (k.startsWith("#") ? [...p.nodes.values()].find((x) => x.anyOf?.includes(k))?.id ?? k : k);
   function subtreeMatches(n, q, p, seen) {
     if (nameOf(n.id, book).toLowerCase().includes(q)) return true;
     if (!n.broken || seen.has(n.id)) return false; seen.add(n.id);
-    return n.recipe[2].some(([k]) => { const c = p.nodes.get(k); return c && subtreeMatches(c, q, p, seen); });
+    return n.recipe[2].some(([k]) => { const c = p.nodes.get(childId(k, p)); return c && subtreeMatches(c, q, p, seen); });
   }
   function fillIcons(root) {
     for (const img of root.querySelectorAll("img[data-ic]")) {
-      const id = img.dataset.ic, real = id.startsWith("#") ? memberOf(book, id, result?.prefer) : id;
-      const spec = real && book?.items?.[real]?.[1];
-      iconUrl(real ?? id, spec, readTexture).then((u) => { if (u) img.src = u; else img.classList.add("none"); });
+      const id = img.dataset.ic;
+      iconUrl(id, book?.items?.[id]?.[1], readTexture).then((u) => { if (u) img.src = u; });
     }
   }
-  function render() { renderGroup(); if (prefs.sheet) renderSheet(); }
+  function render() {
+    renderControls(); renderGroup();
+    if (!prefs.sheet) return;
+    if (typingHave()) { stale = true; return; }
+    stale = false; renderSheet();
+  }
 
   // ---- hovering: the blocks a row stands for light up; a made item says what uses it -------------------------------
   function cellsFor(id, groupKey) {
     const r = result; if (!r) return [];
     const roots = r.all.roots.get(id) ?? new Set([id]);
-    const items = paletteItems(r.schem, lookup), want = new Set();
-    items.forEach((it, p) => { if (it?.items?.some(([k]) => roots.has(k))) want.add(p); else if (it?.fluid && it.fluid === id) want.add(p); });
+    const want = new Set();
+    paletteItems(r.schem, lookup).forEach((it, p) => { if (it?.items?.some(([k]) => roots.has(k)) || it?.fluid === id) want.add(p); });
     if (!want.size) return [];
     const s = r.schem, sc = r.scope, per = s.perLayer, start = sc.lo * per, end = Math.min(s.height, sc.hi + 1) * per;
     const g = groupKey !== "all" && r.grouping && prefs.tab === "list" ? Number(groupKey) : null;
@@ -223,8 +240,10 @@ export function createMaterials(host) {
     const id = row.dataset.id; host.highlight(cellsFor(id, row.dataset.g));
     const tip = $("matsTip"), uses = result?.all.uses.get(id);
     if (!uses?.size || !ev.currentTarget.closest("#mats")) { tip.classList.remove("on"); return; }
-    const list = [...uses].sort((a, b) => b[1] - a[1]);
-    tip.innerHTML = `<b>${esc(nameOf(id, book))}</b> · ${fmt(result.all.nodes.get(id)?.gross ?? 0)} go into<div class="u">${list.slice(0, 10).map(([k, q]) => `<span>${fmt(q)}</span><span>${esc(nameOf(k, book))}</span>`).join("")}${list.length > 10 ? `<span></span><span class="dim">and ${list.length - 10} more</span>` : ""}</div>`;
+    // what the item goes into, and how many of it the blocks take as they are
+    const list = [...uses].sort((a, b) => b[1] - a[1]), placed = result.prefer.get(id) ?? 0;
+    const lines = [...(placed ? [[placed, "placed as they are"]] : []), ...list.slice(0, 10).map(([k, q]) => [q, nameOf(k, book)])];
+    tip.innerHTML = `<b>${esc(nameOf(id, book))}</b> · ${fmt(result.all.nodes.get(id)?.gross ?? 0)} in all<div class="u">${lines.map(([q, t]) => `<span>${fmt(q)}</span><span>${esc(t)}</span>`).join("")}${list.length > 10 ? `<span></span><span class="dim">and ${list.length - 10} more</span>` : ""}</div>`;
     tip.classList.add("on");
     const box = $("mats").getBoundingClientRect(), rr = row.getBoundingClientRect();
     tip.style.left = `${Math.max(8, Math.min(rr.left - box.left + 150, box.width - tip.offsetWidth - 8))}px`;
@@ -234,25 +253,42 @@ export function createMaterials(host) {
   function onLeave(ev) { for (const el of ev.currentTarget.querySelectorAll("[data-hover]")) delete el.dataset.hover; host.highlight(null); $("matsTip").classList.remove("on"); }
 
   // ---- input ---------------------------------------------------------------------------------------------------------
+  // A control in a row is found again after a redraw by what it is for (its item and group), so the keyboard keeps
+  // its place when a tick, a recipe or a ▸ redraws the list.
+  const KEYS = ["have", "done", "pick", "tg"];
+  function focusKey(el) { const k = el && KEYS.find((x) => el.dataset?.[x] !== undefined); return k ? [k, el.dataset[k], el.closest("[data-g]")?.dataset.g] : null; }
+  function refocus(key) {
+    if (!key) return;
+    const [k, id, g] = key, el = [...$("matsList").querySelectorAll(`[data-${k}]`)].find((x) => x.dataset[k] === id && x.closest("[data-g]")?.dataset.g === g);
+    el?.focus(); if (k === "have") el?.select?.();
+  }
+  const keepFocus = (fn) => { const key = focusKey(document.activeElement); fn(); refocus(key); };
   function setHave(id, text) {
     const n = parseHave(text, id, book);
-    if (n === null) { host.status(`"${text}": a number, or 2s (stacks), 1sb (shulker boxes), 3b (blocks)`, "err"); return false; }
+    if (n === null) { host.status(`"${text}": a number, or 2s (stacks), 1sb (shulker boxes)${book?.packs?.[id] ? ", 3b (blocks)" : ""}`, "err"); return false; }
     if (n) fs.have[id] = n; else delete fs.have[id];
     persist(); recompute(); return true;
   }
   function wire() {
     for (const el of [$("matsList"), $("matsTop")]) { el.addEventListener("mouseover", onOver); el.addEventListener("mouseleave", onLeave); }
     $("matsTop").addEventListener("click", () => setSheet(true));
+    // a redraw held back while a Have box had the keyboard happens once it lets go
+    $("matsList").addEventListener("focusout", () => setTimeout(() => { if (stale && !typingHave()) { stale = false; keepFocus(renderSheet); } }));
     $("matsList").addEventListener("click", (ev) => {
       const tg = ev.target.closest("[data-tg]");
-      if (tg) { const id = tg.dataset.tg, node = result?.all.nodes.get(id); fs.open[id] = !(node?.broken ?? false); persist(); recompute(); return; }
+      if (tg) { const id = tg.dataset.tg, node = result?.all.nodes.get(id); fs.open[id] = !(node?.broken ?? false); persist(); keepFocus(recompute); return; }
       const solo = ev.target.closest("[data-solo]"); if (solo) { host.soloPart(solo.dataset.solo); return; }
       const ly = ev.target.closest("[data-layer]"); if (ly) host.singleLayer(Number(ly.dataset.layer));
     });
     $("matsList").addEventListener("change", (ev) => {
       const h = ev.target.closest("[data-have]"); if (h) { if (!setHave(h.dataset.have, h.value)) h.value = fs.have[h.dataset.have] ? fmt(fs.have[h.dataset.have]) : ""; return; }
-      const d = ev.target.closest("[data-done]"); if (d) { if (d.checked) fs.done[d.dataset.done] = true; else delete fs.done[d.dataset.done]; persist(); recompute(); return; }
-      const pk = ev.target.closest("[data-pick]"); if (pk) { fs.pick[pk.dataset.pick] = Number(pk.value); persist(); recompute(); }
+      const d = ev.target.closest("[data-done]"); if (d) { if (d.checked) fs.done[d.dataset.done] = true; else delete fs.done[d.dataset.done]; persist(); keepFocus(recompute); return; }
+      const pk = ev.target.closest("[data-pick]");
+      if (pk) {
+        const id = pk.dataset.pick, i = Number(pk.value);
+        if (wouldLoop(book, id, i, fs.pick)) { host.status(`that recipe for ${nameOf(id, book)} needs ${nameOf(id, book)} itself on the way: kept the one before`, "err"); pk.value = String(fs.pick[id] ?? book.best[id]); return; }
+        fs.pick[id] = i; persist(); keepFocus(recompute);
+      }
     });
     $("matsList").addEventListener("keydown", (ev) => {
       if (!ev.target.matches("[data-have]")) return;
@@ -260,15 +296,17 @@ export function createMaterials(host) {
         // the next row's box (Shift: the one before), found again after the change has redrawn the list
         ev.preventDefault();
         const all = [...$("matsList").querySelectorAll("input.have:not([disabled])")], next = all[all.indexOf(ev.target) + (ev.shiftKey ? -1 : 1)];
-        const key = next ? [next.dataset.have, next.closest("[data-g]")?.dataset.g] : null;
+        const key = focusKey(next);
         ev.target.blur();
-        if (key) { const el = [...$("matsList").querySelectorAll("input.have")].find((x) => x.dataset.have === key[0] && x.closest("[data-g]")?.dataset.g === key[1]); el?.focus(); el?.select(); }
+        if (stale) { stale = false; renderSheet(); }
+        refocus(key);
       }
       if (ev.key === "Escape") { ev.target.value = fs.have[ev.target.dataset.have] ? fmt(fs.have[ev.target.dataset.have]) : ""; ev.target.blur(); }
       ev.stopPropagation();
     });
     const seg = (id, key) => $(id).addEventListener("click", (ev) => { const b = ev.target.closest("button[data-v]"); if (!b || b.disabled) return; prefs[key] = b.dataset.v; persist(); recompute(); });
     seg("matsPreset", "preset"); seg("matsPreset2", "preset"); seg("matsUnits", "units");
+    for (const id of ["matsPreset", "matsPreset2"]) for (const b of $(id).querySelectorAll("button[data-v]")) b.dataset.title = b.title;
     $("matsCompact").onclick = () => { prefs.compact = !prefs.compact; persist(); render(); };
     $("matsHideDone").onclick = () => { prefs.hideDone = !prefs.hideDone; persist(); render(); };
     $("matsGroup").onchange = (ev) => { prefs.group = ev.target.value; persist(); recompute(); };
@@ -283,7 +321,7 @@ export function createMaterials(host) {
       const b = $("matsReset");
       if (b.dataset.armed !== "1") { b.dataset.armed = "1"; b.textContent = "Clear: sure?"; setTimeout(() => { b.dataset.armed = ""; b.textContent = "Clear"; }, 3000); return; }
       b.dataset.armed = ""; b.textContent = "Clear";
-      fs = { have: {}, done: {}, open: {}, pick: {} }; persist(); recompute(); host.status("cleared what you have, ticked and chose for this file");
+      fs = EMPTY(); persist(); recompute(); host.status("cleared what you have, ticked and chose for this file");
     };
     $("matsCopy").onclick = async () => { try { await navigator.clipboard.writeText(exportText()); host.status("materials list copied"); } catch { host.status("could not copy the list", "err"); } };
     $("matsMd").onclick = () => host.download(new Blob([exportMarkdown()], { type: "text/markdown" }), `${stem()}-materials.md`);
@@ -293,8 +331,8 @@ export function createMaterials(host) {
   const snapshot = (sc) => ({ lo: sc.lo, hi: sc.hi, hidden: new Set(sc.hidden), chips: sc.chips });
   function setSheet(on) {
     prefs.sheet = on; persist();
-    $("mats").hidden = !on; $("matsOpen").setAttribute("aria-pressed", String(on));
-    if (on) { if (!result) compute(); renderSheet(); } else { host.highlight(null); $("matsTip").classList.remove("on"); }
+    $("mats").hidden = !on;
+    if (on) { if (!result) compute(); render(); } else { renderControls(); host.highlight(null); $("matsTip").classList.remove("on"); }
   }
 
   // ---- export --------------------------------------------------------------------------------------------------------
@@ -302,7 +340,7 @@ export function createMaterials(host) {
   const scopeText = () => (pinned ?? host.scope()).chips.join(", ");
   function exportRows() {
     const r = result; if (!r) return [];
-    return r.sections.flatMap((s) => s.leaves.map((n) => ({ group: s.label, id: n.id, name: nameOf(n.id, book), need: n.net, have: n.have, total: n.gross, packed: packText(n.net, n.id, { units: prefs.units, compact: prefs.compact, book }), note: noteOf(book, n.id, n, { preset: rollup() }) })));
+    return r.sections.flatMap((s) => s.leaves.map((n) => ({ group: s.label, id: n.id, name: nameOf(n.id, book), need: n.net, have: n.have, total: n.gross, packed: packText(n.net, n.id, { units: prefs.units, compact: prefs.compact, book }), note: [altText(book, n), noteOf(book, n.id, n, { preset: rollup() })].filter(Boolean).join("; ") || null })));
   }
   const title = () => `${host.file()?.name ?? "schematic"}: ${PRESET_NAME[rollup()]}, ${scopeText()}`;
   function exportText() {
@@ -324,17 +362,19 @@ export function createMaterials(host) {
   function exportJson() {
     const t = result?.totals;
     return { file: host.file()?.name ?? null, scope: scopeText(), rollup: rollup(), units: prefs.units, totals: t ?? null, items: exportRows(),
-      fluids: Object.fromEntries(result?.fluids ?? []), unknown: Object.fromEntries(result?.unknown ?? []) };
+      fluids: { ...Object.fromEntries(result?.fluids ?? []), ...(result?.wet ? { waterlogged: result.wet } : {}) }, unknown: Object.fromEntries(result?.unknown ?? []) };
   }
 
   wire();
-  $("mats").hidden = !prefs.sheet; $("matsOpen").setAttribute("aria-pressed", String(prefs.sheet));
+  $("mats").hidden = !prefs.sheet;
+  renderControls();
 
   return {
-    /** A new file: its own have values, unpinned. */
+    /** A new file: its own have values, unpinned (and no recount still waiting from the layers it reset). */
     fileChanged() {
+      clearTimeout(timer);
       const f = host.file(); fsKey = f?.hash ? fileKey(f.hash) : null;
-      fs = fsKey ? load(fsKey, { have: {}, done: {}, open: {}, pick: {} }) : { have: {}, done: {}, open: {}, pick: {} };
+      fs = fsKey ? load(fsKey, EMPTY()) : EMPTY();
       pinned = null; partCache = { schem: null }; recompute();
     },
     /** The layers, shell or parts changed. */
@@ -342,13 +382,10 @@ export function createMaterials(host) {
     /** The recipe book (prepareBook's) and a reader for the pack's textures; state: loading, ready or missing. */
     setBook(b, reader, state = b ? "ready" : "missing") {
       if (b !== book) resetIcons();
-      book = b; readTexture = reader; bookState = state;
-      has = b ? (id) => id in b.items : () => true;
-      lookup = b ? { has, from: (id) => b.blocks?.[id] ?? null } : has;
+      book = b; readTexture = reader; bookState = state; lookup = lookupOf(b);
       recompute();
     },
     toggleSheet() { setSheet(!prefs.sheet); },
-    isOpen: () => prefs.sheet,
     close() { if (prefs.sheet) { setSheet(false); return true; } return false; },
     /** The hover tooltip's line for a block (its palette key): the item it is placed from, how many in view. */
     describeKey(key) {
@@ -356,14 +393,15 @@ export function createMaterials(host) {
       if (!it) return "";
       if (it.fluid) return `${nameOf(it.fluid, book)} (fluid, not counted)`;
       if (it.unknown) return "no item found for it";
-      return it.items.map(([k, n]) => `${n > 1 ? `${n} × ` : ""}${nameOf(k, book)}${result?.prefer.has(k) ? ` · ${fmt(result.prefer.get(k))} in view` : ""}`).join(" + ");
+      return it.items.map(([k, n]) => `${n > 1 ? `${n} × ` : ""}${nameOf(k, book)}${result?.prefer.has(k) ? ` · ${fmt(result.prefer.get(k))} in view` : ""}`).join(" + ") + (it.wet ? " · waterlogged" : "");
     },
     /** For agents and tests: the list as it shows, or with another rollup; setHave(id, "2s"). */
     list({ preset, group } = {}) {
       const keep = { preset: prefs.preset, group: prefs.group };
-      if (preset) prefs.preset = preset; if (group) prefs.group = group;
+      if (preset) prefs.preset = preset;
+      if (group) prefs.group = group;
       compute(); const out = exportJson();
-      Object.assign(prefs, keep); compute(); render();
+      Object.assign(prefs, keep); recompute();
       return out;
     },
     setHave,
