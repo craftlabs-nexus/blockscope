@@ -22,14 +22,18 @@ one for the Roof toggle and one for Inspect.
   blocks wait for the visitor's own pack (the page says so), where a jar's namespaces are learned once and
   remembered, and a namespace no remembered jar has is looked for in the jars whose slug, file name or title matches
   it. The merged
-  pack (the client's block assets, the mods' assets as they are, chest models and the framed drawers' composites
-  generated in the page) is kept by the renderer in IndexedDB under a name that hashes everything that went into
+  pack (the client's block assets, the mods' assets as they are, and generated in the page: chest models, the framed
+  drawers' composites, and models for the blocks the game draws with block-entity renderers, which have no shape of
+  their own: banners with their colors and patterns, mob heads and skulls, shulker boxes, decorated pots and their
+  sherds, the conduit, copper golem statues, the end portal and gateway, the books on lecterns and enchanting
+  tables) is kept by the renderer in IndexedDB under a name that hashes everything that went into
   it, so a second visit renders without a download; the jars are kept too, so another schematic needs at most the
   jars it adds. **Your own pack** instead: drop a launcher instance or mods folder, a Modrinth `.mrpack` or a
   CurseForge zip, or pick one in the File group. A plain resource-pack `.zip` dropped on the page goes on top.
 - **The file.** Layer slicing, the roof, walls and floor toggles, hiding parts, the sign text and the per-layer counts
   of the build animation are all worked out in the page from the file in memory (`src/schematic.js`), which also
-  renames framed drawers per material set so their composite models apply. A file is read by what it holds, not its
+  renames framed drawers per material set, and banners with patterns and pots with sherds per design, so their
+  generated models apply. A file is read by what it holds, not its
   name: a Sponge `.schem` as it is; a `.litematic` and a structure `.nbt` are turned into one in the page
   (`src/formats.js`; a Litematica file's regions are merged at their positions, a structure void or air never erasing
   another region's block); anything else, an MCEdit `.schematic`, by the renderer's WASM (Nucleation). The parts, the
@@ -190,7 +194,7 @@ publishes them is not part of this repository.
 | `index.html`, `src/main.js` | the page |
 | `src/schematic.js`, `src/nbt.js` | the schematic in memory: NBT in the browser, info, shell, parts, signs, layer counts, the file the renderer gets |
 | `src/formats.js` | Litematica and structure files turned into Sponge ones, and the block metadata, mod list and description a file carries |
-| `src/parts.js`, `src/framed.js` | the plan's parts and shell from its metadata; framed drawers' ids per material set |
+| `src/parts.js`, `src/framed.js`, `src/decorated.js` | the plan's parts and shell from its metadata; framed drawers' ids per material set; patterned banners' and sherd pots' ids per design |
 | `src/plans.js` | plan files: the schematic, its metadata and paintings |
 | `src/paintings.js`, `src/buildgif.js` | the paintings overlay; the build animation's framing and GIF encoding |
 | `src/materials/` | the materials list: the recipe book read from the jars (`book.js`), blocks to items, counting and rolling up (`engine.js`, no DOM), item icons from the pack's textures (`icons.js`), the group and the sheet (`panel.js`) |

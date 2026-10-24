@@ -1,6 +1,7 @@
 // The resource pack for one schematic, built in the browser: the Minecraft client jar's block assets, the assets of
 // the mods whose namespaces the schematic uses (from the pack source, through Packrat: the plan, then fetchRows with
-// every listed hash checked), the chest models and the schematic's framed drawers (generated.js), merged into one
+// every listed hash checked), the chest models and the schematic's framed drawers (generated.js) and the models of the
+// blocks the game draws with block-entity renderers (entities.js), merged into one
 // zip the renderer loads. The renderer keeps that zip in its own database under the pack's name; the name is a hash
 // of everything that goes into it (packName), so an unchanged schematic and source never build twice.
 //
@@ -14,11 +15,12 @@ import { get, put, getFile, putFile, entryKey } from "./store.js";
 import { clientJar, clientRecord, hasClient } from "./mojang.js";
 import { fetchWithProgress } from "./download.js";
 import { addChests, addFramed } from "./generated.js";
+import { addEntityBlocks } from "./entities.js";
 import { sha256Text } from "./sources.js";
 import { buildBook, BOOK_FILE } from "../materials/book.js";
 
 /** Bump when what the builder writes changes, so every cached pack is rebuilt. */
-export const GENERATOR = 6;   // 2: the materials list's recipe book and the item textures; 4: chests mapped as the game maps them; 6: the recipe book's crops, machines and sets
+export const GENERATOR = 6;   // 2: the materials list's recipe book and the item textures; 4: chests mapped as the game maps them; 5: banners, heads, shulker boxes, pots, conduit, statues, portals; 6: the recipe book's crops, machines and sets
 export const PACK_PREFIX = "blockscope:";
 const MODRINTH_UA = "craftlabs-nexus/blockscope/0.1 (https://github.com/craftlabs-nexus/blockscope)";
 // what of the client jar goes in: the block assets and the textures block models and the renderer read (entity
@@ -38,7 +40,7 @@ export function wantedNamespaces(schematic) {
 /** The pack's name for a schematic and a source: the renderer finds a pack it already holds by it. */
 export async function packName(schematic, source) {
   const d = await source.describe();
-  const key = { g: GENERATOR, src: d.id, mc: d.minecraft, ns: wantedNamespaces(schematic), framed: schematic.framedCombos().map((c) => c.id).sort() };
+  const key = { g: GENERATOR, src: d.id, mc: d.minecraft, ns: wantedNamespaces(schematic), framed: schematic.framedCombos().map((c) => c.id).sort(), decorated: schematic.decoratedCombos().map((c) => c.id).sort() };
   return `${PACK_PREFIX}${(await sha256Text(JSON.stringify(key))).slice(0, 24)}`;
 }
 
@@ -219,9 +221,10 @@ export async function buildPack({ schematic, source, ui, signal }) {
   }
   const chests = await addChests(out, clientZip);
   const framed = await addFramed(out, schematic.framedCombos());
+  const entityBlocks = await addEntityBlocks(out, clientZip, schematic.decoratedCombos());
   const pv = JSON.parse((await clientZip.file("version.json")?.async("string")) ?? "{}").pack_version;
   out.file("pack.mcmeta", JSON.stringify({ pack: { pack_format: pv?.resource_major ?? pv?.resource ?? 1, description: `Blockscope: Minecraft ${desc.minecraft} + ${report.mods.length} mods from ${fromWords}` } }, null, 2));
-  Object.assign(report, { vanillaFiles: vanilla, chests, framed: framed.made, framedMissing: framed.missing });
+  Object.assign(report, { vanillaFiles: vanilla, chests, framed: framed.made, framedMissing: framed.missing, entityBlocks: entityBlocks.made, entityTexturesMissing: entityBlocks.missing });
   // the materials list's recipe book, from the same jars (materials/book.js)
   ui.progress("reading the recipes…");
   try {

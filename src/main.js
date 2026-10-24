@@ -8,6 +8,7 @@ import { analyzeFolder, analyzePackZip, detectPackZip, fromFileList } from "@cra
 import { Schematic } from "./schematic.js";
 import { partOf, partsOf, shellPart } from "./parts.js";
 import { framedRealId } from "./framed.js";
+import { decoratedRealId, DYES } from "./decorated.js";
 import { buildPaintings } from "./paintings.js";
 import { collectPoints, frameView, applyView, viewState, restoreView as restoreCamera, sizeFor, encodeGif } from "./buildgif.js";
 import { buildPack, packName, wantedNamespaces, PACK_PREFIX } from "./pack/build.js";
@@ -468,6 +469,9 @@ async function startRenderer() {
       showAxes: false,
       enableDragAndDrop: false,   // the page reads dropped files itself (schematics in memory, packs through Packrat)
       enableGizmos: false,
+      // shulker boxes and the lectern's book from the pack's models (pack/entities.js: the boxes' color and facing, the
+      // book on the lectern's top), not the renderer's own meshes
+      blockEntityModels: { ...Object.fromEntries(["", ...DYES].map((c) => [`minecraft:${c ? `${c}_` : ""}shulker_box`, null])), "minecraft:lectern": null },
       enableInteraction: params.get("pick") !== "off",
       interactionOptions: { enableBlockSelection: params.get("pick") !== "off" },
       simulationOptions: { enableSimulation: simOn },
@@ -760,7 +764,9 @@ function describeBlock(so, x, y, z) {
     const b = so.getSchematicWrapper().get_block_with_properties(x, y, z);
     // a framed drawer or trim is rendered per material set (framed.js): show the mod's block and the materials
     const framed = b ? framedRealId(b.name()) : null;
-    let id = framed ? framed.id : b ? b.name() : "minecraft:air";
+    // a banner with patterns or a pot with sherds is rendered per design (decorated.js): show the game's block
+    const decorated = b && !framed ? decoratedRealId(b.name()) : null;
+    let id = framed ? framed.id : decorated ? decorated.id : b ? b.name() : "minecraft:air";
     const matName = (m) => (m ? m.replace(/^[a-z_]+:/, "").replaceAll("_", " ") : "raw (unframed)");
     const frame = framed ? `side ${matName(framed.side)} / trim ${matName(framed.trim)}${framed.kind === "trim" ? "" : ` / front ${matName(framed.front)}`}` : null;
     const state = b ? Object.entries(b.properties()) : [];

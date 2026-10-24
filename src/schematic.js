@@ -1,13 +1,15 @@
 // The loaded schematic in memory, and everything the page reads from it or does to it before the renderer sees it:
 // its size and world offset, whether its top layer is a roof, its shell (roof, walls, floor), its parts' cells, its
-// signs, its namespaces and framed material sets, how many blocks each layer has, and the file the renderer gets
-// (layers sliced off, hidden cells turned to air, framed drawers renamed per material set). A Sponge .schem is read
+// signs, its namespaces, framed material sets and decorated banners and pots, how many blocks each layer has, and the
+// file the renderer gets (layers sliced off, hidden cells turned to air, framed drawers renamed per material set,
+// banners with patterns and pots with sherds per design). A Sponge .schem is read
 // as it is; a .litematic or a structure .nbt is turned into one in the page (formats.js), anything else (an MCEdit
 // .schematic) by Nucleation, the renderer's WASM. The block metadata comes from the file when it carries some
 // (BlockInfo, formats.js), and a Litematica file's regions stand in for parts in a file without it.
 import { readNbt, encodeNbt, gzip, decodeVarints, encodeVarints } from "./nbt.js";
 import { formatOf, litematicToSponge, structureToSponge, readBlockInfo, readMods, readDescription } from "./formats.js";
 import { framedKind, framedViewerId } from "./framed.js";
+import { decoratedViewerId } from "./decorated.js";
 import { partOf, shellPart } from "./parts.js";
 
 const AIR = /^minecraft:(cave_|void_)?air$/;
@@ -170,6 +172,22 @@ export class Schematic {
     const be = this.#entitiesByCell();
     for (let i = 0; i < this.data.length; i++) { const id = framed.get(this.data[i]); if (id) { const [x, y, z] = this.cellOf(i); yield [i, id, be.get(`${x},${y},${z}`)]; } }
   }
+  /** Every banner pattern set and pot sherd set the file uses: [{ id, kind, ... }] (decorated.js). */
+  decoratedCombos() {
+    const out = new Map();
+    for (const [, d] of this.#decoratedCells()) if (!out.has(d.id)) out.set(d.id, d);
+    return [...out.values()];
+  }
+  *#decoratedCells() {
+    const ids = new Map(); this.keys.forEach((k, i) => { if (k && /^minecraft:([a-z_]+_banner|decorated_pot)$/.test(baseId(k))) ids.set(i, baseId(k)); });
+    if (!ids.size) return;
+    const be = this.#entitiesByCell();
+    for (let i = 0; i < this.data.length; i++) {
+      const id = ids.get(this.data[i]); if (!id) continue;
+      const [x, y, z] = this.cellOf(i), d = decoratedViewerId(id, be.get(`${x},${y},${z}`));
+      if (d) yield [i, d];
+    }
+  }
   #entitiesByCell() {
     const m = new Map();
     for (const e of this.entities) { const p = e.Pos; if (!p) continue; const [x, y, z] = Array.from(p.v ?? p, Number); m.set(`${x},${y},${z}`, e.Data ?? e); }
@@ -201,8 +219,8 @@ export class Schematic {
 
   /**
    * The file the renderer gets, gzipped: only the layers minY <= y < maxY (maxY null for the top, negative from the
-   * top), the `hidden` block indices turned to air (their block entities dropped), and framed drawers renamed per
-   * material set (framed.js) so the pack's composite models apply.
+   * top), the `hidden` block indices turned to air (their block entities dropped), and framed drawers, banners with
+   * patterns and pots with sherds renamed per design (framed.js, decorated.js) so the pack's composite models apply.
    */
   async render({ hidden = new Set(), minY = 0, maxY = null, framed = true } = {}) {
     if (maxY === null || maxY === undefined) maxY = this.height;
@@ -219,6 +237,7 @@ export class Schematic {
       const state = this.idAt(i).match(/(\[.*)$/)?.[1] ?? "";
       data[i] = idOf(framedViewerId(id, be).id + state);
     }
+    if (framed) for (const [i, d] of this.#decoratedCells()) data[i] = idOf(d.id + (this.idAt(i).match(/(\[.*)$/)?.[1] ?? ""));
     for (let i = 0; i < data.length; i++) if (gone(i)) data[i] = air;
     const keep = (e) => { const p = e.Pos; if (!p) return true; const [x, y, z] = Array.from(p.v ?? p, Number); return !gone(this.index(x, y, z)); };
     const dataKey = "BlockData" in this.blocks ? "BlockData" : "Data";   // v3 calls it Data
