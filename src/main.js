@@ -149,6 +149,8 @@ const signAt = new Map(), paintingAt = new Map();
 function setFile(f, { fromUrl = false } = {}) {
   file = f; schemName = f.name;
   pinned.cell = null;   // the last file's pin (a link's ?at= pins in the new one once it is drawn)
+  // the last file's build may not have shown layers (an instanced or greedy build); this one gets its chance
+  loaded.live = loaded.canFilter;
   const own = f.schem.metaSource === "file" ? f.schem.meta : null;
   meta = own ?? f.schem.meta ?? null;
   metaFrom = own ? "the file's own metadata" : f.schem.metaSource === "regions" ? "the Litematica file's regions" : "";
@@ -248,7 +250,10 @@ const simOn = params.get("sim") === "on";
 // and draws the layers and groups asked for (showCells: no reload, a few ms to a few tens), so a change of layers,
 // parts or shell keeps the file; only another file loads. `live` is false where the renderer cannot (one without
 // showCells, or a build without layer runs): the file it gets then carries only what is drawn, the rest as air.
-const loaded = { file: null, hidden: null, live: true, cut: false };   // cut: the file the renderer has leaves out what is hidden
+// cut: the file the renderer has leaves out what is hidden; pending: a load on its way (the renderer still holds the
+// last file until it is in); canFilter: false once the renderer is found to have no showCells (an older one), so a
+// file is then loaded cut from the start
+const loaded = { file: null, hidden: null, live: true, cut: false, pending: null, canFilter: true };
 const schematicObject = () => renderer?.schematicManager?.getSchematic?.(SCHEM_ID) ?? renderer?.schematicManager?.getFirstSchematic?.();
 /** The layers drawn as the renderer takes them (minY..maxY-1), null for all. */
 const rangeNow = () => (layer.mode === "all" ? null : { minY: layer.lo, maxY: layer.hi + 1 });
@@ -269,9 +274,9 @@ function hiddenGroupsNow() { const f = groupFlagsNow(), out = []; for (let g = 1
 const canShowNow = (so) => loaded.live && !loaded.cut && !!so?.showCells && loaded.file === file && !typesOutsideGroups();
 /** The file as the renderer gets it now: all of it, or (not live) the hidden cells as air and the layer range. */
 function renderBytes() {
-  const cutNow = !loaded.live || typesOutsideGroups();
-  loaded.file = file; loaded.hidden = hiddenCells(); loaded.cut = cutNow;
-  const cut = cutNow ? { hidden: loaded.hidden, ...(rangeNow() ?? {}) } : {};
+  const cutNow = !loaded.live || typesOutsideGroups(), hidden = hiddenCells();
+  loaded.pending = { file, hidden, cut: cutNow };
+  const cut = cutNow ? { hidden, ...(rangeNow() ?? {}) } : {};
   return file.schem.render(cut).then((u8) => u8.buffer);
 }
 /** What the renderer takes with a file: the cell groups and what to show, when it can. */
@@ -645,9 +650,11 @@ async function startRenderer() {
         onResourcePackLoaded: () => status("pack loaded, meshing…", "busy"),
         onSchematicLoaded: () => {
           status(`${schemName} parsed, building meshes…`, "busy");
-          // the first file is whole: the renderer gets its cell groups, and draws what a link asks for from its first build
+          // the renderer holds the file the load was for now
+          if (loaded.pending) { Object.assign(loaded, { file: loaded.pending.file, hidden: loaded.pending.hidden, cut: loaded.pending.cut }); loaded.pending = null; }
+          // a whole file: the renderer gets its cell groups, and draws what is asked for now from its first build
           const so = schematicObject();
-          if (!so?.showCells || !so?.setCellGroups) loaded.live = false;
+          if (!so?.showCells || !so?.setCellGroups) loaded.live = loaded.canFilter = false;
           else { so.setCellGroups(cellGroupsNow()); so.showCells(rangeNow(), hiddenGroupsNow()); }
         },
         onSchematicRendered: () => {
@@ -1374,6 +1381,8 @@ async function reloadLayers(what) {
   applyLayers();
   hideGhost(); showMatCells(null);
   const so = schematicObject();
+  // a whole file of this one on its way: the renderer shows what is asked for once it is in (onSchematicLoaded)
+  if (loaded.pending?.file === file && !loaded.pending.cut && loaded.live && !typesOutsideGroups()) return;
   if (canShowNow(so)) {
     if (await so.showCells(rangeNow(), hiddenGroupsNow())) { layersShown(); return; }
     loaded.live = false;   // this build cannot: the file is loaded with only what is drawn
@@ -1381,7 +1390,7 @@ async function reloadLayers(what) {
   unknown.clear();
   saveView();
   status(`reloading ${what}…`, "busy");
-  try { await renderer.schematicManager.loadSchematic(SCHEM_ID, await renderBytes(), loadProps()); } catch (e) { status(e.message, "err"); }
+  try { await renderer.schematicManager.loadSchematic(SCHEM_ID, await renderBytes(), loadProps()); } catch (e) { loaded.pending = null; status(e.message, "err"); }
   restoreSoon();
 }
 /** After the renderer shows other cells of the file it has: what the page draws over them follows. */
