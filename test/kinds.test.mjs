@@ -228,3 +228,18 @@ test("redstone: the one hop goes from what gives power, and takes both halves of
 test("redstone: a lightning rod in every weathering", () => {
   for (const id of ["lightning_rod", "exposed_lightning_rod", "waxed_oxidized_lightning_rod"]) assert.ok(kindsOfId(`minecraft:${id}`) & KIND_BIT.redstone, id);
 });
+
+test("trees: a trunk under its crown; not a log frame a hedge touches, a potted sapling's shelf, or bamboo", async () => {
+  const hedge = "minecraft:oak_leaves[distance=7,persistent=true,waterlogged=false]";
+  // a cabin wall of lying logs, a hedge against its west end; its corner post stands at the east end
+  const s = await build(5, 3, 2, { "0,0,1": hedge, "0,0,0": "minecraft:spruce_log[axis=x]", "1,0,0": "minecraft:spruce_log[axis=x]", "2,0,0": "minecraft:spruce_log[axis=x]", "3,0,0": "minecraft:spruce_log[axis=y]", "3,1,0": "minecraft:spruce_log[axis=y]",
+    "4,0,0": "minecraft:oak_log[axis=y]", "4,1,0": "minecraft:oak_log[axis=y]", "4,2,0": hedge });
+  const k = classify(s);
+  assert.deepEqual([0, 1, 2, 3].map((x) => kindsAt(s, k, x, 0, 0).includes("trees")), [true, false, false, false], "only the log the hedge touches");
+  assert.deepEqual([kindsAt(s, k, 4, 1, 0), kindsAt(s, k, 4, 0, 0)], [["trees"], ["trees"]], "the trunk, all the way down");
+  const p = await build(3, 1, 1, { "0,0,0": "minecraft:potted_oak_sapling", "1,0,0": "minecraft:stripped_oak_log[axis=x]", "2,0,0": "minecraft:bamboo[age=0,leaves=none,stage=0]" });
+  const kp = classify(p);
+  assert.ok(!kindsAt(p, kp, 1, 0, 0).includes("trees"), "a shelf with a potted sapling on it");
+  const b = await build(1, 2, 1, { "0,0,0": "minecraft:bamboo[age=0,leaves=none,stage=0]", "0,1,0": "minecraft:jungle_leaves[distance=1,persistent=false,waterlogged=false]" });
+  assert.deepEqual(kindsAt(b, classify(b), 0, 0, 0), ["plants"], "bamboo under leaves");
+});
