@@ -8,7 +8,7 @@ import { classify, typesOf, familyOf, familiesOf, firstKinds, KIND_ORDER, codeGr
 const i32 = (v) => ({ t: 3, v }), i16 = (v) => ({ t: 2, v });
 
 /** A W × H × L Sponge schematic of air with `blocks` ("x,y,z" -> palette key) placed. */
-async function build(W, H, L, blocks) {
+async function build(W, H, L, blocks, dataVersion = 4000) {
   const palette = { "minecraft:air": i32(0) }, data = new Array(W * H * L).fill(0);
   let next = 1;
   for (const [at, key] of Object.entries(blocks)) {
@@ -16,7 +16,7 @@ async function build(W, H, L, blocks) {
     const [x, y, z] = at.split(",").map(Number);
     data[(y * L + z) * W + x] = palette[key].v;
   }
-  const nbt = { name: "", value: { Version: i32(2), DataVersion: i32(4000), Width: i16(W), Height: i16(H), Length: i16(L), Offset: new Int32Array([0, 0, 0]), PaletteMax: i32(next), Palette: palette, BlockData: encodeVarints(data) } };
+  const nbt = { name: "", value: { Version: i32(2), DataVersion: i32(dataVersion), Width: i16(W), Height: i16(H), Length: i16(L), Offset: new Int32Array([0, 0, 0]), PaletteMax: i32(next), Palette: palette, BlockData: encodeVarints(data) } };
   return Schematic.load(await gzip(encodeNbt(nbt)), "t.schem");
 }
 const kindsAt = (s, k, x, y, z) => kindsOfMask(k.mask[s.index(x, y, z)]);
@@ -51,7 +51,8 @@ test("redstone: what a wire stands on and points into, and a lone dot's neighbou
   assert.equal(whyAt(s, k, 1, 0, 1), "holds a component");
   assert.equal(whyAt(s, k, 2, 1, 1), "powered by a component", "the wire runs into it");
   assert.deepEqual(kindsAt(s, k, 0, 1, 1), ["terrain"], "the wire does not point west");
-  assert.equal(whyAt(s, k, 4, 1, 3), "powered by a component", "a dot powers its solid neighbours");
+  assert.equal(k.reason[s.index(4, 1, 3)], 0, "a dot (since 1.16) powers only what it stands on");
+  assert.equal(whyAt(s, k, 3, 0, 3), "holds a component");
   assert.deepEqual(kindsAt(s, k, 3, 1, 4), ["glass"], "glass is not solid");
 });
 
@@ -191,4 +192,11 @@ test("families: copper's weathering is one family; colours only of the dyed bloc
   const t = (id, count) => ({ id: `minecraft:${id}`, name: id, mod: null, count });
   const names = familiesOf([t("sand", 9), t("red_sand", 3), t("nether_bricks", 8), t("red_nether_bricks", 2), t("terracotta", 5), t("orange_terracotta", 2), t("copper_block", 4), t("exposed_copper", 3), t("waxed_weathered_copper", 1)]).map((f) => `${f.name} ${f.members.length}`);
   assert.deepEqual(names, ["copper 3", "terracotta 2"]);
+});
+
+test("redstone: a wire with no side connected was a cross before 1.16, powering its solid neighbours", async () => {
+  const blocks = { "1,0,1": "minecraft:stone", "1,1,1": "minecraft:redstone_wire[east=none,north=none,south=none,west=none,power=0]", "2,1,1": "minecraft:oak_planks" };
+  const old = await build(3, 2, 3, blocks, 2230), now = await build(3, 2, 3, blocks, 3700);
+  assert.equal(whyAt(old, classify(old), 2, 1, 1), "powered by a component");
+  assert.equal(classify(now).reason[now.index(2, 1, 1)], 0);
 });

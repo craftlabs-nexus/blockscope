@@ -108,6 +108,8 @@ export function classify(schem, { shellCells = new Map(), meta = null } = {}) {
   };
 
   const mask = new Uint16Array(n), reason = new Uint8Array(n), core = [];
+  // the game version the file was saved by (1.16 is data version 2566); a file that does not say is taken as newer
+  const dataVersion = Number(schem.root?.DataVersion?.v ?? schem.root?.DataVersion ?? 0), oldWire = dataVersion > 0 && dataVersion < 2566;
   let logs = 0, nonAir = 0;
   for (let i = 0; i < n; i++) {
     const p = data[i]; if (isAir[p]) continue;
@@ -137,8 +139,10 @@ export function classify(schem, { shellCells = new Map(), meta = null } = {}) {
     if (/:(redstone_wall_torch|tripwire_hook)$/.test(id) && f) pull(step(i, back(f)), R.holds);
     if (/:redstone_(wall_)?torch$/.test(id)) pullIf(above, solid, R.powered);
     if (/:redstone_wire$/.test(id)) {
-      const dot = SIDES.every((s) => !pr[s] || pr[s] === "none");
-      for (const s of SIDES) if (dot || pr[s] === "side" || pr[s] === "up") pullIf(step(i, DIRS[s]), solid, R.powered);
+      // a wire with no side connected: before 1.16 that was a cross (it powered all four sides), since then a dot that
+      // powers only what it stands on (an unconnected cross is written with every side "side")
+      const cross = oldWire && SIDES.every((s) => !pr[s] || pr[s] === "none");
+      for (const s of SIDES) if (cross || pr[s] === "side" || pr[s] === "up") pullIf(step(i, DIRS[s]), solid, R.powered);
     }
     if (/:(repeater|comparator)$/.test(id) && f) pullIf(step(i, back(f)), solid, R.powered);   // the output: opposite its facing
     if (/:comparator$/.test(id) && f) {
