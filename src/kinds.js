@@ -167,7 +167,7 @@ export function classify(schem, { shellCells = new Map(), meta = null } = {}) {
       }
     }
     if (/:hopper$/.test(id)) { if (f) pullIf(step(i, f), readable, R.fed); pullIf(above, readable, R.fed); }
-    if (/:(dropper|dispenser)$/.test(id) && f) pullIf(step(i, f), readable, R.fed);
+    if (/:dropper$/.test(id) && f) pullIf(step(i, f), readable, R.fed);   // a dispenser throws items out, a dropper puts them in
   }
   // one hop: doors, lamps, note blocks and the like beside a component that gives power; a door's other half with it
   for (const i of core) {

@@ -251,3 +251,11 @@ test("redstone: a wire beside a chest, a cauldron or a potted plant does not pow
   assert.equal(k.reason[s.index(2, 1, 1)], 0); assert.equal(k.reason[s.index(0, 1, 1)], 0); assert.equal(k.reason[s.index(1, 1, 0)], 0);
   assert.equal(whyAt(s, k, 1, 1, 2), "powered by a component");
 });
+
+test("redstone: a dropper feeds the chest it faces, a dispenser does not", async () => {
+  const chest = "minecraft:chest[facing=north,type=single,waterlogged=false]";
+  const s = await build(4, 1, 1, { "0,0,0": "minecraft:dropper[facing=east,triggered=false]", "1,0,0": chest, "2,0,0": "minecraft:dispenser[facing=east,triggered=false]", "3,0,0": chest });
+  const k = classify(s);
+  assert.equal(whyAt(s, k, 1, 0, 0), "fed by a hopper or dropper");
+  assert.deepEqual(kindsAt(s, k, 3, 0, 0), ["storage"]);
+});
