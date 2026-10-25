@@ -925,7 +925,7 @@ canvas.addEventListener("wheel", () => { userMoved = true; cancelRestores(); }, 
 canvas.addEventListener("dblclick", (ev) => {
   const hit = hitUnderPointer(...ndcOf(ev));
   const ctl = controls(); if (!hit || !ctl?.target) return;
-  userMoved = true;
+  userMoved = true; noteInput();
   if (topView.on) { ctl.target.x = hit.point.x; ctl.target.z = hit.point.z; placeTop(); return; }   // centers that block
   ctl.target.copy(hit.point); ctl.update?.();
 });
@@ -935,7 +935,7 @@ function lookNorth() {
   if (topView.on) { turnTopTo(Math.round(topView.heading / (2 * Math.PI)) * 2 * Math.PI); return; }   // north up
   const ctl = controls(), cam = camera(); if (!ctl?.target || !cam) return;
   const off = cam.position.clone().sub(ctl.target); const flat = Math.hypot(off.x, off.z) || 1;
-  cam.position.set(ctl.target.x, cam.position.y, ctl.target.z + flat); ctl.update?.(); userMoved = true; redraw();
+  cam.position.set(ctl.target.x, cam.position.y, ctl.target.z + flat); ctl.update?.(); userMoved = true; redraw(); noteInput();
 }
 $("compass").onclick = lookNorth;
 // "Forward" along the ground: the view direction flattened. Looking steeply down (or up) that shrinks to nothing and
@@ -1370,6 +1370,7 @@ function flyToBox(min, max) {
   const fov = cam.isPerspectiveCamera ? (cam.fov * Math.PI) / 180 : 1;
   const dist = cam.isPerspectiveCamera ? (size / 2) / Math.tan(fov / 2) * 1.25 + 2 : cam.position.distanceTo(ctl.target);
   ctl.target.copy(center); cam.position.copy(center).addScaledVector(dir, dist); ctl.update?.(); userMoved = true; redraw();
+  noteInput();   // the view a reload puts back is this one
   return true;
 }
 // The renderer refits its camera to the schematic on every load, so a layer change would throw the view back to the
@@ -2148,7 +2149,7 @@ window.blockscope = {
     const w = (p) => [p[0] + o.x, p[1] + o.y, p[2] + o.z];
     const [px, py, pz] = w(pos), [tx, ty, tz] = w(target);
     if (ctl?.target) { ctl.target.set(tx, ty, tz); cam.position.set(px, py, pz); ctl.update?.(); } else { cam.position.set(px, py, pz); cam.lookAt(tx, ty, tz); }
-    cam.updateProjectionMatrix(); userMoved = true;
+    cam.updateProjectionMatrix(); userMoved = true; noteInput();
     await sleep(300);
     return blobToDataUrl(await screenshot(width, height));
   },
