@@ -120,7 +120,7 @@ function hiddenCells() {
   if (typesOutsideGroups()) { const th = typeHiddenFlags(), of = blocks.types.ofPalette; extra = (i) => th[of[s.data[i]]] === 1; }
   return (flagsCache.cells = new HiddenCells(c.groups, flagsCache.flags, extra));
 }
-/** What hides a cell (file index), in words ("roof", "part Aisle 1", "kind terrain", "type stone"); null when drawn. */
+/** What hides a cell (file index), in words ("roof", "part north wing", "kind terrain", "type stone"); null when drawn. */
 function hiddenWhy(i) {
   if (!file || !hiddenCells().has(i)) return null;
   const c = codedNow(), g = c.groups[i], k = c.kinds[g];
@@ -181,6 +181,7 @@ function setFile(f, { fromUrl = false } = {}) {
   // of the footprint)
   Object.assign(shell, { roof: true, wall: true, floor: true });
   hiddenPartSet.clear(); hiddenKinds.clear(); onlyKinds.clear(); picking = false; hiddenTypes.clear(); typesAll = false;
+  layer.wantBottomUp = false;   // the last file's "look from below once drawn" 
   layer.mode = "all"; layer.cur = Math.max(0, info.height - 2);
   if (fromUrl) {
     if (params.get("hide") !== null) { for (const p of params.get("hide").split(",")) if (p in shell) shell[p] = false; }
@@ -727,7 +728,7 @@ async function startRenderer() {
   );
   canvas.schematicRenderer = renderer; // handy in the console
   renderer.eventEmitter?.once?.("schematicRendered", () => keepBaseLowest(renderer).catch(() => {}));
-  renderer.eventEmitter.on("simulationSynced", () => { const so = renderer.schematicManager.getFirstSchematic(); so?.rebuildMesh?.(); const sm = renderer.simulationManager; if (sm) simInfo(`tick ${sm.getState().tickCount}`); });
+  renderer.eventEmitter.on("simulationSynced", () => { const so = schematicObject(); so?.rebuildMesh?.(); const sm = renderer.simulationManager; if (sm) simInfo(`tick ${sm.getState().tickCount}`); });
 }
 /** Opens a file record (a plan file or one from disk): the first starts the renderer, a later one replaces the file
  *  and switches the pack when its mods differ. */
@@ -788,7 +789,7 @@ function frontDirection() {
     const net = file.schem.fronts(lo, hi, hiddenCells());
     const best = Object.keys(net).map((d) => [d, net[d] - net[OPPOSITE[d]]]).sort((a, b) => b[1] - a[1])[0];
     // clear: the side has at least twice the fronts of the side opposite it, and most of the fronts that do not
-    // cancel (the hall: drawers north against a few south, its aisles' east and west chests cancelling)
+    // cancel (a storage room: drawers north against a few south, its aisles' east and west chests cancelling)
     const unpaired = Math.abs(net.north - net.south) + Math.abs(net.east - net.west);
     if (best[1] >= 2 && net[best[0]] >= 2 * net[OPPOSITE[best[0]]] && best[1] >= 0.6 * unpaired) dir = best[0];
   } catch (e) { console.warn("[blockscope] could not read the fronts for Fit", e); }
@@ -1037,7 +1038,7 @@ requestAnimationFrame(function hoverLoop() {
   let hit = null;
   try { hit = hitUnderPointer(x, y); } catch { return; }
   if (!hit) { showTip(null); placeBox("hover", null); return; }
-  const so = renderer.schematicManager.getFirstSchematic(); const p = cellOfHit(hit);
+  const so = schematicObject(); const p = cellOfHit(hit);
   if (!so || !p) return;
   placeBox("hover", p);
   showTip(describeBlock(so, p.x, p.y, p.z));
@@ -1091,7 +1092,7 @@ function blockText(d) {
 }
 /** Copies the pinned block (read again, so a simulated change shows). */
 async function copyBlock() {
-  const so = renderer?.schematicManager.getFirstSchematic(), c = pinned.cell;
+  const so = schematicObject(), c = pinned.cell;
   if (!so || !c) { status("click a block first, then copy it"); return; }
   const d = describeBlock(so, c.x, c.y, c.z); if (!d.cell) { status(d.id, "err"); return; }
   try { await navigator.clipboard.writeText(blockText(d)); status(`copied ${d.id.replace(/^minecraft:/, "")} at ${d.world.join(" ")}`); }
@@ -1099,7 +1100,7 @@ async function copyBlock() {
 }
 /** Pins a block by world coordinates as a click would (?at=, window.inspectAt); false when it is outside the file. */
 function pinWorld(wx, wy, wz) {
-  const so = renderer?.schematicManager.getFirstSchematic(); if (!so) return false;
+  const so = schematicObject(); if (!so) return false;
   const [ox, oy, oz] = info.offset, x = wx - ox, y = wy - oy, z = wz - oz;
   if (x < 0 || y < 0 || z < 0 || x >= info.width || y >= info.height || z >= info.length) return false;
   showBlock(describeBlock(so, x, y, z)); return true;
@@ -1521,7 +1522,7 @@ canvas.addEventListener("pointerdown", (ev) => { downAt = [ev.clientX, ev.client
 canvas.addEventListener("click", (ev) => {
   ev.stopImmediatePropagation(); // the renderer's own click (a highlight box on a cell one off from ours) stays out
   if (downAt && Math.hypot(ev.clientX - downAt[0], ev.clientY - downAt[1]) > 5) return; // a drag is not a click
-  const so = renderer?.schematicManager.getFirstSchematic(); const p = cellOfHit(hitUnderPointer(...ndcOf(ev)));
+  const so = schematicObject(); const p = cellOfHit(hitUnderPointer(...ndcOf(ev)));
   if (!so || !p) { showBlock(null); return; }
   showBlock(describeBlock(so, p.x, p.y, p.z));
   const sm = renderer.simulationManager;
@@ -1558,7 +1559,7 @@ async function setDigits(on) {
 const simInfo = (t) => { const el = $("simInfo"); el.textContent = t || "—"; el.title = t ?? ""; $("simSum").textContent = simOn ? t : "off"; };
 simInfo(simOn ? "not compiled" : "off; open the page with ?sim=on");
 $("simStart").onclick = async () => {
-  const sm = renderer?.simulationManager, so = renderer?.schematicManager.getFirstSchematic();
+  const sm = renderer?.simulationManager, so = schematicObject();
   if (!sm || !so) { simInfo("open the page with ?sim=on first"); return; }
   simInfo("compiling…");
   const ok = await sm.initializeSimulation(so.getSchematicWrapper(), { syncMode: "synced", optimize: false });
@@ -1905,7 +1906,7 @@ function syncUrl(now = false) {
     // the dev server reopens the last file from disk by name (reopenLocal)
     if (import.meta.env.DEV && !file.param) q.set("local", file.name); else q.delete("local");
     for (const k of ["minY", "maxY"]) q.delete(k);
-    // only what differs from the first load: the hall's roof is hidden by default, so that needs no parameter
+    // only what differs from the first load: a roof covering most of the footprint is hidden by default, so that needs no parameter
     const off = hiddenParts().filter((p) => !(p === "roof" && roofHiddenByDefault())); if (off.length) q.set("hide", off.join(",")); else q.delete("hide");
     if (shell.roof && roofHiddenByDefault()) q.set("roof", "on"); else q.delete("roof");
     // a soloed part is the short form, ?part=name; otherwise the hidden ones are listed
@@ -2153,7 +2154,7 @@ function focusBlockNow(wx, wy, wz, { radius = 3, pin = true } = {}) {
   }
   flyToBox(c.map((v) => v - radius), c.map((v) => v + radius));
   if (pin) pinWorld(wx, wy, wz);
-  const so = renderer.schematicManager.getFirstSchematic();
+  const so = schematicObject();
   return so ? describeBlock(so, ...c) : null;
 }
 /** Flies to a block (world coordinates), `radius` blocks of it around it, and pins it as a click would. */
@@ -2192,9 +2193,9 @@ window.blockscope = {
     return blobToDataUrl(await screenshot(width, height));
   },
   fit: fitView,
-  describe: (x, y, z) => { const so = renderer?.schematicManager.getFirstSchematic(); return so ? describeBlock(so, x, y, z) : null; },
+  describe: (x, y, z) => { const so = schematicObject(); return so ? describeBlock(so, x, y, z) : null; },
   pick: (ndcX, ndcY) => {
-    const so = renderer?.schematicManager.getFirstSchematic(), hit = hitUnderPointer(ndcX, ndcY), p = cellOfHit(hit);
+    const so = schematicObject(), hit = hitUnderPointer(ndcX, ndcY), p = cellOfHit(hit);
     const names = []; for (let o = hit?.object; o && o !== group(); o = o.parent) if (o.name) names.push(o.name);
     return so && p ? { ...describeBlock(so, p.x, p.y, p.z), hitMesh: names.join(" < ") } : null;
   },
