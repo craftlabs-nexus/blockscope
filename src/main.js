@@ -63,11 +63,13 @@ const hiddenPartSet = new Set();
 // those kinds, ?hideKind=a,b hides them; ?type=id,… and ?hideType=id,… the same for types.
 let blocks = { kinds: null, types: null, families: [], familyOf: new Map() };   // classify(), typesOf() and familiesOf() of the file
 const hiddenKinds = new Set(), onlyKinds = new Set(), hiddenTypes = new Set();
+// kinds picked by solo: only the blocks of the kinds in onlyKinds show (none, once the last picked one is hidden)
+let picking = false;
 const SHELL_KEYS = ["roof", "wall", "floor"];
 const maskOf = (keys) => { let m = 0; for (const k of keys) m |= KIND_BIT[k] ?? 0; return m; };
 const shellHiddenMask = () => maskOf(SHELL_KEYS.filter((k) => !shell[k]));
 /** Whether a kind's blocks are drawn, as far as the kinds go. */
-const kindShown = (k) => (onlyKinds.size ? onlyKinds.has(k) : !hiddenKinds.has(k)) && (!(k in shell) || shell[k]);
+const kindShown = (k) => (picking ? onlyKinds.has(k) : !hiddenKinds.has(k)) && (!(k in shell) || shell[k]);
 const kindName = (k) => KINDS.find((x) => x.key === k)?.name ?? k;
 const kindCount = (k) => blocks.kinds?.counts[KINDS.findIndex((x) => x.key === k)] ?? 0;
 const typeOf = (id) => blocks.types?.types.find((t) => t.id === id) ?? null;
@@ -81,7 +83,7 @@ const cellHidden = (x, y, z) => {
   return hiddenCells().has(file.schem.index(fx, fy, fz));
 };
 /** What hides what, as a key for the caches below. */
-const filterKey = () => [hiddenParts(), [...hiddenPartSet].sort(), [...hiddenKinds].sort(), [...onlyKinds].sort(), [...hiddenTypes].sort()].map((l) => l.join(",")).join("|");
+const filterKey = () => [hiddenParts(), [...hiddenPartSet].sort(), [...hiddenKinds].sort(), picking ? ["only", ...[...onlyKinds].sort()] : [], [...hiddenTypes].sort()].map((l) => l.join(",")).join("|");
 let flagsCache = { file: null, key: null, flags: null, cells: null };
 /** Which cell groups are hidden now (one byte a group of cellGroupsNow's table): a hidden part, kind or type. */
 function groupFlagsNow() {
@@ -93,7 +95,7 @@ function groupFlagsNow() {
   const flags = new Uint8Array(c.size);
   for (let g = 1; g < c.size; g++) {
     const k = c.kinds[g];
-    if (partHidden[c.part[g]] || k & hid || (only && !(k & only)) || (c.typed && typeHidden[c.type[g]])) flags[g] = 1;
+    if (partHidden[c.part[g]] || k & hid || (picking && !(k & only)) || (c.typed && typeHidden[c.type[g]])) flags[g] = 1;
   }
   flagsCache = { file, key, flags, cells: null };
   return flags;
@@ -124,7 +126,7 @@ function hiddenWhy(i) {
   const sh = SHELL_KEYS.find((r) => k & KIND_BIT[r] && !shell[r]); if (sh) return sh;
   const pn = info.parts[c.part[g] - 1]?.name; if (pn && hiddenPartSet.has(pn)) return `part ${pn}`;
   const hk = [...hiddenKinds].find((x) => k & KIND_BIT[x]); if (hk) return `kind ${kindName(hk).toLowerCase()}`;
-  if (onlyKinds.size && !(k & maskOf(onlyKinds))) return `only ${[...onlyKinds].map((x) => kindName(x).toLowerCase()).join(", ")} shown`;
+  if (picking && !(k & maskOf(onlyKinds))) return onlyKinds.size ? `only ${[...onlyKinds].map((x) => kindName(x).toLowerCase()).join(", ")} shown` : "every kind hidden";
   const t = blocks.types.types[blocks.types.ofPalette[file.schem.data[i]] - 1];
   return t && hiddenTypes.has(t.id) ? `type ${t.name}` : "hidden";
 }
@@ -177,7 +179,7 @@ function setFile(f, { fromUrl = false } = {}) {
   // the shell and the parts: from the link on the first load, else the defaults (the roof hidden when it covers most
   // of the footprint)
   Object.assign(shell, { roof: true, wall: true, floor: true });
-  hiddenPartSet.clear(); hiddenKinds.clear(); onlyKinds.clear(); hiddenTypes.clear(); typesAll = false;
+  hiddenPartSet.clear(); hiddenKinds.clear(); onlyKinds.clear(); picking = false; hiddenTypes.clear(); typesAll = false;
   layer.mode = "all"; layer.cur = Math.max(0, info.height - 2);
   if (fromUrl) {
     if (params.get("hide") !== null) { for (const p of params.get("hide").split(",")) if (p in shell) shell[p] = false; }
@@ -187,7 +189,7 @@ function setFile(f, { fromUrl = false } = {}) {
     if (params.get("part") !== null) { const keep = new Set(params.get("part").split(",")); for (const n of names) if (!keep.has(n)) hiddenPartSet.add(n); }
     if (params.get("hidePart") !== null) for (const n of params.get("hidePart").split(",")) if (names.includes(n)) hiddenPartSet.add(n);
     // kinds and types (the shell's kinds are the shell toggles: ?hideKind=roof is ?hide=roof)
-    for (const k of (params.get("kind") ?? "").split(",")) if (k in KIND_BIT) { onlyKinds.add(k); if (k in shell) shell[k] = true; }
+    if (params.get("kind") !== null) { picking = true; for (const k of params.get("kind").split(",")) if (k in KIND_BIT) { onlyKinds.add(k); if (k in shell) shell[k] = true; } }
     for (const k of (params.get("hideKind") ?? "").split(",")) if (k in shell) shell[k] = false; else if (k in KIND_BIT) hiddenKinds.add(k);
     const ids = blocks.types.types.map((t) => t.id);
     if (params.get("type") !== null) { const keep = new Set(params.get("type").split(",").map(typeId)); for (const id of ids) if (!keep.has(id)) hiddenTypes.add(id); }
@@ -345,7 +347,7 @@ function kindGroups() {
 /** What the Blocks group hides, in words: "only redstone", "no terrain, trees", "3 types hidden". */
 function blockWords() {
   const out = [], lower = (k) => kindName(k).toLowerCase();
-  if (onlyKinds.size) out.push(`only ${[...onlyKinds].map(lower).join(", ")}`);
+  if (picking) out.push(onlyKinds.size ? `only ${[...onlyKinds].map(lower).join(", ")}` : "no kinds");
   else if (hiddenKinds.size) out.push(`no ${[...hiddenKinds].map(lower).join(", ")}`);
   const st = soloedType(), sf = st ? null : soloedFamily();
   if (st) out.push(`only ${typeOf(st)?.name ?? st}`);
@@ -1164,7 +1166,7 @@ const blockRows = new Map();   // "kind:<key>", "family:<key>" or "type:<id>" ->
 const blockActs = new Map();   // the same keys -> { eye, solo }: what a row's buttons do, for the keyboard
 const openFamilies = new Set();   // the families listed open
 let blockSel = [];   // the rows picked: by the arrow keys in the filter (one), or a block's kinds (K)
-const soloedKind = () => (onlyKinds.size === 1 ? [...onlyKinds][0] : null);
+const soloedKind = () => (picking && onlyKinds.size === 1 ? [...onlyKinds][0] : null);
 const soloedType = () => { const t = blocks.types?.types ?? []; return t.length > 1 && hiddenTypes.size === t.length - 1 ? (t.find((x) => !hiddenTypes.has(x.id))?.id ?? null) : null; };
 function renderBlocks() {
   const k = blocks.kinds, ty = blocks.types?.types ?? [];
@@ -1174,7 +1176,7 @@ function renderBlocks() {
   const filter = $("blockFilter").value.trim().toLowerCase();
   const kindsOff = showKinds ? k.listed.filter((x) => !kindShown(x)).length : 0;
   $("blocksSum").textContent = [showKinds && `${k.listed.length} kinds`, `${ty.length} types`, kindsOff + hiddenTypes.size && `${kindsOff + hiddenTypes.size} hidden`].filter(Boolean).join(" · ");
-  $("blocksAll").disabled = !kindsOff && !hiddenTypes.size && !onlyKinds.size;
+  $("blocksAll").disabled = !kindsOff && !hiddenTypes.size && !picking;
   // kinds, most blocks first
   const kl = $("kinds"); kl.replaceChildren();
   $("kindsHead").style.display = kl.style.display = showKinds ? "" : "none";
@@ -1264,7 +1266,8 @@ function soloFamily(fam) {
 /** After a kind or type is hidden or shown: the lists, the shell buttons and the view follow. */
 function blocksChanged(what) { showShellState(); renderBlocks(); return reloadLayers(what); }
 function toggleKind(k) {
-  if (onlyKinds.size) { if (onlyKinds.has(k)) onlyKinds.delete(k); else { onlyKinds.add(k); if (k in shell) shell[k] = true; } }
+  // picking stays on when the last picked kind is hidden: then no kind's blocks show, as hiding the last type shown
+  if (picking) { if (onlyKinds.has(k)) onlyKinds.delete(k); else { onlyKinds.add(k); if (k in shell) shell[k] = true; } }
   else if (k in shell) shell[k] = !shell[k];
   else if (hiddenKinds.has(k)) hiddenKinds.delete(k); else hiddenKinds.add(k);
   return blocksChanged(`${kindShown(k) ? "with" : "without"} ${kindName(k).toLowerCase()}`);
@@ -1272,7 +1275,7 @@ function toggleKind(k) {
 /** Shows only that kind's blocks (with the other filters standing), or every kind again when it is the one shown. */
 function soloKind(k) {
   const solo = soloedKind() === k;
-  onlyKinds.clear(); hiddenKinds.clear();
+  onlyKinds.clear(); hiddenKinds.clear(); picking = !solo;
   if (!solo) { onlyKinds.add(k); if (k in shell) shell[k] = true; }
   return blocksChanged(solo ? "every kind" : `only ${kindName(k).toLowerCase()}`);
 }
@@ -1286,7 +1289,7 @@ function soloType(id) {
   return blocksChanged(solo ? "every type" : `only ${typeOf(id)?.name ?? id}`);
 }
 $("blocksAll").onclick = () => {
-  hiddenKinds.clear(); onlyKinds.clear(); hiddenTypes.clear();
+  hiddenKinds.clear(); onlyKinds.clear(); picking = false; hiddenTypes.clear();
   for (const k of SHELL_KEYS) if (blocks.kinds?.shown && blocks.kinds.listed.includes(k)) shell[k] = true;
   blocksChanged("every kind and type");
 };
@@ -1849,7 +1852,7 @@ function syncUrl(now = false) {
     if (solo) q.set("part", solo); else if (hiddenPartSet.size) q.set("hidePart", [...hiddenPartSet].join(","));
     // kinds picked, or hidden; types shown or hidden, whichever list is shorter
     for (const k of ["kind", "hideKind", "type", "hideType"]) q.delete(k);
-    if (onlyKinds.size) q.set("kind", [...onlyKinds].join(",")); else if (hiddenKinds.size) q.set("hideKind", [...hiddenKinds].join(","));
+    if (picking) q.set("kind", [...onlyKinds].join(",")); else if (hiddenKinds.size) q.set("hideKind", [...hiddenKinds].join(","));
     if (hiddenTypes.size) {
       const short = (id) => id.replace(/^minecraft:/, ""), shown = blocks.types.types.filter((t) => !hiddenTypes.has(t.id)).map((t) => short(t.id));
       if (shown.length < hiddenTypes.size) q.set("type", shown.join(",")); else q.set("hideType", [...hiddenTypes].map(short).join(","));
@@ -2015,7 +2018,7 @@ function agentState() {
     file: schemName || null, status: $("status").textContent, error: $("status").className === "err", agent: AGENT,
     size: [info.width, info.height, info.length], origin: [...info.offset],
     parts: info.parts.length, hiddenParts: [...hiddenPartSet], layers: { mode: layer.mode, fileY: shownRange() },
-    kinds: { only: [...onlyKinds], hidden: [...hiddenKinds, ...SHELL_KEYS.filter((k) => !shell[k])] }, hiddenTypes: [...hiddenTypes],
+    kinds: { only: picking ? [...onlyKinds] : null, hidden: [...hiddenKinds, ...SHELL_KEYS.filter((k) => !shell[k])] }, hiddenTypes: [...hiddenTypes],
     pinned: pinned.cell ? toWorld([pinned.cell.x, pinned.cell.y, pinned.cell.z]) : null,
     camera: cam ? { position: r(cam.position), target: r(ctl?.target), view: topView.on ? "top" : camPreset } : null,
     pack: currentPack, unknownBlocks: unknown.size, url: location.href,
