@@ -68,6 +68,8 @@ const NOT_SOLID = /glass|slab|stairs|fence|_wall$|pane|door|leaves|torch|sign|ba
 const READABLE = /jukebox|lectern|cake|composter|beehive|bee_nest|cauldron|respawn_anchor|end_portal_frame|chiseled_bookshelf|drawer|crafter/;
 const IMMOVABLE = /obsidian|bedrock|respawn_anchor|reinforced_deepslate|end_portal|end_gateway|spawner|enchanting_table|beacon|jukebox|lectern|_sign$|_banner$|bell$|conduit|barrier|command_block|structure_block|jigsaw|_head$|_skull$/;
 const WORKED = /_door$|_trapdoor$|_fence_gate$|note_block$|bell$|tnt$|redstone_lamp$|copper_bulb$|dispenser$|dropper$|piston$/;
+// the components that give power (the one hop goes from these): not a hopper, a lamp, a door or a piston, which take it
+const POWERS = /:(redstone_wire|repeater|comparator|observer|redstone_(wall_)?torch|redstone_block|lever|.*_button|.*_pressure_plate|tripwire_hook|daylight_detector|target|(calibrated_)?sculk_sensor|detector_rail|trapped_chest|.*lightning_rod)$/;
 const DIRS = { north: [0, 0, -1], south: [0, 0, 1], east: [1, 0, 0], west: [-1, 0, 0], up: [0, 1, 0], down: [0, -1, 0] };
 const SIDES = ["north", "south", "east", "west"];
 const SIX = Object.values(DIRS);
@@ -164,8 +166,15 @@ export function classify(schem, { shellCells = new Map(), meta = null } = {}) {
     if (/:hopper$/.test(id)) { if (f) pullIf(step(i, f), readable, R.fed); pullIf(above, readable, R.fed); }
     if (/:(dropper|dispenser)$/.test(id) && f) pullIf(step(i, f), readable, R.fed);
   }
-  // one hop: doors, lamps, note blocks and the like beside a component
-  for (const i of core) for (const d of SIX) pullIf(step(i, d), worked, R.worked);
+  // one hop: doors, lamps, note blocks and the like beside a component that gives power; a door's other half with it
+  for (const i of core) {
+    if (!POWERS.test(ids[data[i]])) continue;
+    for (const d of SIX) {
+      const j = step(i, d); if (j < 0 || !worked[data[j]] || mask[j] & RED) continue;
+      pull(j, R.worked);
+      if (/_door$/.test(ids[data[j]])) for (const v of [DIRS.up, DIRS.down]) { const k = step(j, v); if (k >= 0 && ids[data[k]] === ids[data[j]]) pull(k, R.worked); }
+    }
+  }
 
   // the shell, and kinds the metadata names
   for (const [i, role] of shellCells) if (KIND_BIT[role]) mask[i] |= KIND_BIT[role];

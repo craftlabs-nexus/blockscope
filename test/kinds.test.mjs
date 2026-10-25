@@ -215,3 +215,12 @@ test("the metadata's own kinds, over a box of its own", async () => {
   const k = classify(s, { meta });
   assert.deepEqual([kindsAt(s, k, 0, 0, 0), kindsAt(s, k, 1, 0, 0)], [["lighting"], []]);
 });
+
+test("redstone: the one hop goes from what gives power, and takes both halves of a door", async () => {
+  const door = (half) => `minecraft:oak_door[facing=north,half=${half},hinge=left,open=false,powered=false]`;
+  const s = await build(6, 2, 1, { "0,0,0": "minecraft:hopper[enabled=true,facing=down]", "1,0,0": door("lower"), "1,1,0": door("upper"),
+    "3,0,0": "minecraft:lever[face=floor,facing=north,powered=false]", "4,0,0": door("lower"), "4,1,0": door("upper") });
+  const k = classify(s);
+  assert.deepEqual([kindsAt(s, k, 1, 0, 0), kindsAt(s, k, 1, 1, 0)], [["openings"], ["openings"]], "a hopper takes power, it gives none");
+  assert.deepEqual([whyAt(s, k, 4, 0, 0), whyAt(s, k, 4, 1, 0)], ["worked by a component", "worked by a component"]);
+});
