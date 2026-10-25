@@ -243,3 +243,11 @@ test("trees: a trunk under its crown; not a log frame a hedge touches, a potted 
   const b = await build(1, 2, 1, { "0,0,0": "minecraft:bamboo[age=0,leaves=none,stage=0]", "0,1,0": "minecraft:jungle_leaves[distance=1,persistent=false,waterlogged=false]" });
   assert.deepEqual(kindsAt(b, classify(b), 0, 0, 0), ["plants"], "bamboo under leaves");
 });
+
+test("redstone: a wire beside a chest, a cauldron or a potted plant does not power it", async () => {
+  const s = await build(3, 2, 3, { "1,0,1": "minecraft:stone", "1,1,1": "minecraft:redstone_wire[east=side,north=side,south=side,west=side,power=0]",
+    "2,1,1": "minecraft:chest[facing=north,type=single,waterlogged=false]", "0,1,1": "minecraft:cauldron", "1,1,0": "minecraft:potted_poppy", "1,1,2": "minecraft:oak_planks" });
+  const k = classify(s);
+  assert.equal(k.reason[s.index(2, 1, 1)], 0); assert.equal(k.reason[s.index(0, 1, 1)], 0); assert.equal(k.reason[s.index(1, 1, 0)], 0);
+  assert.equal(whyAt(s, k, 1, 1, 2), "powered by a component");
+});

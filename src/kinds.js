@@ -65,7 +65,7 @@ export const REDSTONE_REASONS = [null, "a component", "holds a component", "powe
 const R = { core: 1, holds: 2, powered: 3, watched: 4, read: 5, pushed: 6, fed: 7, worked: 8 };
 
 // what the neighbour rules ask of a block
-const NOT_SOLID = /glass|slab|stairs|fence|_wall$|pane|door|leaves|torch|sign|banner|button|lever|rail|carpet|pressure_plate|flower|grass(?!_block)|fern|water|lava|ladder|vine|chain|bars|lantern|candle|pot$|head$|skull$|_bed$|scaffolding|^minecraft:snow$|cobweb|sapling|mushroom$|coral|kelp|seagrass|bush|petals|roots|dripleaf|plant|tripwire|redstone_wire|repeater|comparator/;
+const NOT_SOLID = /glass|slab|stairs|fence|_wall$|pane|door|leaves|torch|sign|banner|button|lever|rail|carpet|pressure_plate|flower|grass(?!_block)|fern|water|lava|ladder|vine|chain|bars|lantern|candle|pot$|potted_|head$|skull$|_bed$|scaffolding|^minecraft:snow$|cobweb|sapling|mushroom$|coral|kelp|seagrass|bush|petals|roots|dripleaf|plant|tripwire|redstone_wire|repeater|comparator|chest$|cauldron|lectern|campfire|anvil|bell$|cake|composter|brewing_stand|enchanting_table|grindstone|stonecutter|end_rod|conduit|_shelf$/;
 const READABLE = /jukebox|lectern|cake|composter|beehive|bee_nest|cauldron|respawn_anchor|end_portal_frame|chiseled_bookshelf|drawer|crafter/;
 const IMMOVABLE = /obsidian|bedrock|respawn_anchor|reinforced_deepslate|end_portal|end_gateway|spawner|enchanting_table|beacon|jukebox|lectern|_sign$|_banner$|bell$|conduit|barrier|command_block|structure_block|jigsaw|_head$|_skull$/;
 const WORKED = /_door$|_trapdoor$|_fence_gate$|note_block$|bell$|tnt$|redstone_lamp$|copper_bulb$|dispenser$|dropper$|piston$/;
