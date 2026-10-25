@@ -6,6 +6,7 @@ import * as THREE from "three";
 import JSZip from "jszip";
 import { analyzeFolder, analyzePackZip, detectPackZip, fromFileList } from "@craftlabs/packrat";
 import { Schematic } from "./schematic.js";
+import { cornersOf, fillWithoutOffset, fitInto } from "./view.js";
 import { classify, typesOf, familiesOf, firstKinds, codeGroups, HiddenCells, KINDS, KIND_BIT, KIND_ORDER, REDSTONE_REASONS, kindsOfMask } from "./kinds.js";
 import { partOf, partsOf } from "./parts.js";
 import { framedRealId } from "./framed.js";
@@ -743,12 +744,18 @@ function centerOnDrawn() {
   ctl.target.add(d); cam.position.add(d); ctl.update?.(); redraw();
 }
 // the library's fit, then the fronts; again after the library's own deferred refit, unless the user has moved since
+// The fill to keep beside the panel is the library's own, measured once right after its fit: the later passes start
+// from a view already backed off, and measuring it again there would back off further every pass. A new fit drops
+// the passes an earlier one still has to come.
+let fitTimers = [];
 function smartFit() {
-  if (topView.on) { topFit(); setTimeout(() => { if (!userMoved && topView.on) topFit(); }, 150); return; }
+  for (const t of fitTimers) clearTimeout(t);
+  if (topView.on) { topFit(); fitTimers = [setTimeout(() => { if (!userMoved && topView.on) topFit(); }, 150)]; return; }
   try { renderer?.cameraManager.focusOnSchematics(); } catch {}
-  const frame = () => { applyViewOffset(); centerOnDrawn(); faceFronts(); fitBeside(); };
+  let want = null;
+  const frame = () => { applyViewOffset(); centerOnDrawn(); faceFronts(); want = fitBeside(want); };
   frame();
-  for (const t of [150, 600]) setTimeout(() => { if (!userMoved) frame(); }, t);
+  fitTimers = [150, 600].map((t) => setTimeout(() => { if (!userMoved) frame(); }, t));
 }
 // The panel floats over the left of the canvas. The view's middle is the middle of the area beside it: a view offset
 // moves the picture's center there without moving the camera, so the pivot, a fit and a turn all sit in what you can
@@ -769,28 +776,16 @@ function applyViewOffset() {
 }
 /** Where the view's middle is on the canvas, in normalized device coordinates (x; y is 0). */
 const viewCenterX = () => { const v = camera()?.view; return v?.enabled ? (-2 * v.offsetX) / v.fullWidth : 0; };
-// After the library's fit (which frames the model in the whole canvas): as far out again as it takes for the model to
-// fill the area beside the panel no more than the library filled the whole canvas.
-function fitBeside() {
-  const cam = camera(), ctl = controls(), v = cam?.view; if (!cam || !ctl?.target || !v?.enabled) return;
-  const box = drawnBox(); if (box.isEmpty()) return;
-  const corners = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => new THREE.Vector3(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z));
-  // how much of the area the box takes (1: edge to edge), across and up, with the view's middle at x0 and half its width hw
-  const fill = (x0, hw) => {
-    cam.updateMatrixWorld(); cam.updateProjectionMatrix();
-    let f = 0; for (const c of corners) { const p = c.clone().project(cam); f = Math.max(f, Math.abs(p.x - x0) / hw, Math.abs(p.y)); }
-    return f;
-  };
-  const view = { ...v };
-  cam.clearViewOffset(); const want = fill(0, 1);
-  cam.setViewOffset(view.fullWidth, view.fullHeight, view.offsetX, 0, view.width, view.height);
-  const x0 = viewCenterX(), hw = 1 - x0;
-  for (let i = 0; i < 4; i++) {
-    const k = fill(x0, hw) / want; if (!(k > 1.01)) break;
-    if (cam.isOrthographicCamera) cam.zoom /= k;
-    else cam.position.sub(ctl.target).multiplyScalar(k).add(ctl.target);
-  }
-  cam.updateProjectionMatrix(); ctl.update?.(); redraw();
+/** After the library's fit (which frames the model in the whole canvas): as far out again as it takes for the model
+ *  to fill the area beside the panel no more than the library filled the whole canvas (`want`, measured here when
+ *  not given). Returns the fill it kept to. */
+function fitBeside(want = null) {
+  const cam = camera(), ctl = controls(); if (!cam || !ctl?.target) return want;
+  const box = drawnBox(); if (box.isEmpty()) return want;
+  const corners = cornersOf(box);
+  if (want === null) want = fillWithoutOffset(cam, corners);
+  if (cam.view?.enabled) { fitInto(cam, ctl.target, corners, viewCenterX(), want); ctl.update?.(); redraw(); }
+  return want;
 }
 const fitView = () => { stopMomentum(); userMoved = false; savedView.on = false; cancelRestores(); smartFit(); syncUrl(); };
 $("focus").onclick = fitView;
