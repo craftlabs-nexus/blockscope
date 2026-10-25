@@ -46,6 +46,8 @@ await blockscope.focusPart(parts[0].name);    // flies to it: { part, blocks, fr
 await blockscope.focusPart(parts[0].name, { solo: true, highlight: true });   // hide every other part; tint it blue
 await blockscope.focusBlock(...blocks[0].at); // flies to it (3 blocks around it), pins it; returns what Inspect shows
 await blockscope.focusBlock(...blocks[0].at, { radius: 6, pin: false });
+await blockscope.focusKind("redstone", { solo: true, highlight: true });   // only the redstone, framed, lit up
+await blockscope.focusType("minecraft:chest");   // flies to the chests ("chest" works too)
 const png = await blockscope.screenshot(1600, 1000);   // the canvas only (no panel), a PNG data URL
 blockscope.state();                           // file, status, size, origin, hidden parts, layers, pinned, camera, pack
 ```
@@ -54,11 +56,13 @@ blockscope.state();                           // file, status, size, origin, hid
 |---|---|
 | `ready(timeout = 300000)` | resolves with `state()` once the first file is drawn and the view has settled (at once if it has); rejects when the file cannot be read or after `timeout` ms, with the status line in the message |
 | `nextRender(timeout = 120000)` | resolves after the next render settles (after you change layers or parts yourself) |
-| `state()` | `file`, `status` and `error` (the status line, red or not), `size` (blocks: x, y, z), `origin` (the world position of the file's corner cell; a cell's world position is origin + file position), `parts`, `hiddenParts`, `layers` (`mode`, `fileY`: the file layers drawn), `pinned`, `camera` (the renderer's scene coordinates, not world), `pack`, `unknownBlocks` (blocks drawn without a model), `url` |
+| `state()` | `file`, `status` and `error` (the status line, red or not), `size` (blocks: x, y, z), `origin` (the world position of the file's corner cell; a cell's world position is origin + file position), `parts`, `hiddenParts`, `kinds` (`only`: the kinds picked by solo, `hidden`), `hiddenTypes`, `layers` (`mode`, `fileY`: the file layers drawn), `pinned`, `camera` (the renderer's scene coordinates, not world), `pack`, `unknownBlocks` (blocks drawn without a model), `url` |
 | `parts()` | the parts in the Parts list's order (from the file's metadata, or a Litematica file's regions) |
+| `kinds()`, `types()` | the Blocks lists: `[{ kind, name, blocks, hidden }]` (the kinds the file lists), `[{ id, name, mod, blocks, hidden }]` (most blocks first) |
+| `focusKind(kind, { solo, highlight })`, `focusType(id, { solo, highlight })` | as `focusPart`, for a kind (`redstone`, `terrain`, …) or a type; returns `{ kind or type, blocks, from, to }` |
 | `findBlocks(query, { limit = 200 })` | blocks whose `id[state]` contains `query` (or matches it, a `RegExp`), first `limit` in file order, and how many in all |
 | `focusPart(name, { solo, highlight })` | shows the part if it was hidden (`solo`: and hides the others), flies to it and selects its row; an unknown name throws with the list of parts |
-| `focusBlock(x, y, z, { radius = 3, pin = true })` | flies to the block with `radius` blocks around it in view and pins it as a click would; returns `{ id, state, part, extra (a sign's text, a painting), world, … }`; outside the file it throws |
+| `focusBlock(x, y, z, { radius = 3, pin = true })` | flies to the block with `radius` blocks around it in view and pins it as a click would; returns `{ id, state, part, kinds (with why a block is redstone), extra (a sign's text, a painting), world, … }`; outside the file it throws |
 | `describe(x, y, z)` | what Inspect shows for a block, by **file** position |
 | `screenshot(w, h)` | a PNG data URL of the canvas alone at that size |
 | `shot([x, y, z], [tx, ty, tz], w, h)` | places the camera (file positions, y from the bottom layer) and returns a screenshot |
@@ -66,9 +70,9 @@ blockscope.state();                           // file, status, size, origin, hid
 | `materials.list({ preset, group })` | the materials list of what the view shows (README, "Materials"), as the sheet's JSON export: `{ file, scope, rollup, totals, items: [{ group, id, name, need, have, total, packed, note }], fluids, unknown }`; `preset` `placed`, `gather` or `raw`, `group` `none`, `part`, `layer` or `mod`; the recipes arrive with the pack a moment after `ready()` (`materials.state().book` is `"ready"`) |
 | `materials.setHave(id, "2s")`, `materials.state()` | what the person has of an item (a number, `2s`, `1sb`, `3b`); the list's settings and this file's have values |
 
-A block can be framed and still not show: above the layers drawn, in a hidden part, or in the roof the page hides by
-default. `focusBlock` returns `hidden` for that (for example `"roof"`); open the page with `?roof=on`, `?layer=…` or
-without `?part=`.
+A block can be framed and still not show: above the layers drawn, in a hidden part, kind or type, or in the roof the
+page hides by default. `focusBlock` returns `hidden` for that (for example `"roof"` or `"kind terrain"`); open the page
+with `?roof=on`, `?layer=…` or without `?part=`, `?kind=` and `?type=`.
 
 ## 4. The same from a link
 
@@ -79,6 +83,8 @@ A link can do it on load, without script (`ready()` resolves after it is applied
 | `?focus=x,y,z` | fly to that block and pin it (world coordinates) |
 | `?focus=<part>` | fly to that part (its name as the Parts list spells it) |
 | `?part=a,b`, `?hidePart=a,b` | only those parts, or those hidden |
+| `?kind=a,b`, `?hideKind=a,b` | only those kinds, or those hidden (`redstone`, `terrain`, `roof`, …: README, "Parameters") |
+| `?type=a,b`, `?hideType=a,b` | only those types, or those hidden (block ids) |
 | `?at=x,y,z` | pin that block, the camera left where it is |
 | `?layer=below,N`, `?layer=single,N` | layers up to N, or only N (file layers, from 0) |
 | `?roof=on`, `?hide=roof,wall,floor` | the shell shown or hidden |

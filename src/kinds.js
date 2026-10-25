@@ -203,3 +203,56 @@ export function typesOf(schem) {
   types.forEach((t, i) => { for (const p of t.palette) ofPalette[p] = i + 1; delete t.palette; });
   return { types, ofPalette };
 }
+
+/**
+ * Each cell's group as the renderer takes it, one 16-bit number a cell: the place of the cell's (part, kinds, type) in
+ * a table of the combinations the file has, so hiding a part, a kind or a type is hiding the groups that hold it, with
+ * no new mesh. `part`: each cell's part (its place in the Parts list + 1, 0 for none); `mask`: each cell's kinds
+ * (classify); `ofPalette`: each palette index's type + 1 (typesOf). Air is group 0. Returns `{ groups, part, kinds,
+ * type, size, typed }`, the table's columns by group. Past `limit` combinations the type is left out of the code
+ * (`typed` false): hiding a type then needs the file loaded again without it.
+ */
+export function codeGroups(schem, part, mask, ofPalette, limit = 65535) {
+  const n = schem.data.length, data = schem.data, groups = new Uint16Array(n);
+  const air = new Uint8Array(schem.keys.length); for (const p of schem.air) air[p] = 1;
+  const code = (withType) => {
+    const index = new Map(), tPart = [0], tKinds = [0], tType = [0];
+    let lastKey = -1, lastG = 0;
+    for (let i = 0; i < n; i++) {
+      const p = data[i]; if (air[p] || !schem.keys[p]) { groups[i] = 0; continue; }
+      const t = withType ? ofPalette[p] : 0, key = (part[i] * 65536 + mask[i]) * 65536 + t;
+      if (key !== lastKey) {
+        let g = index.get(key);
+        if (g === undefined) {
+          g = tPart.length; if (g > limit) return null;
+          index.set(key, g); tPart.push(part[i]); tKinds.push(mask[i]); tType.push(t);
+        }
+        lastKey = key; lastG = g;
+      }
+      groups[i] = lastG;
+    }
+    return { groups, part: Uint16Array.from(tPart), kinds: Uint16Array.from(tKinds), type: Uint16Array.from(tType), size: tPart.length };
+  };
+  const typed = code(true);
+  if (typed) return { ...typed, typed: true };
+  const untyped = code(false);
+  if (untyped) return { ...untyped, typed: false };
+  // more parts × kinds than the code holds: not a file anyone has made; the parts are left out too
+  part = new Uint16Array(n);
+  return { ...code(false), typed: false };
+}
+
+/**
+ * The cells hidden, as a lookup a cell at a time rather than a list: a cell is hidden when its group is (`flags`, one
+ * byte a group), or when `extra(i)` says so (a type hidden in a file whose groups leave types out). Iterable, with a
+ * `size`, so it reads like the Set of cell indices it stands for.
+ */
+export class HiddenCells {
+  constructor(groups, flags, extra = null) { this.groups = groups; this.flags = flags; this.extra = extra; }
+  has(i) { return this.flags[this.groups[i]] === 1 || (this.extra !== null && this.extra(i)); }
+  get size() {
+    if (this.count === undefined) { let n = 0; for (let i = 0; i < this.groups.length; i++) if (this.has(i)) n++; this.count = n; }
+    return this.count;
+  }
+  *[Symbol.iterator]() { for (let i = 0; i < this.groups.length; i++) if (this.has(i)) yield i; }
+}

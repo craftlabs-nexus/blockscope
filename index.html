@@ -113,9 +113,9 @@
 
     /* Parts: a filter box, then one row per part: eye (shown or hidden), name, count, solo. Hovering a row lights the
        part in the view; a hidden part reads dim. */
-    #partFilter { box-sizing: border-box; flex: 1 1 auto; min-width: 0; height: 25px; padding: 0 8px; font: inherit; font-size: 12px; color: var(--fg); background: var(--raised); border: 1px solid var(--line); border-radius: 5px; outline: none; }
-    #partFilter:focus { border-color: var(--accent-line); }
-    #partFilter::placeholder { color: var(--fg-dim); }
+    #partFilter, #blockFilter { box-sizing: border-box; flex: 1 1 auto; min-width: 0; height: 25px; padding: 0 8px; font: inherit; font-size: 12px; color: var(--fg); background: var(--raised); border: 1px solid var(--line); border-radius: 5px; outline: none; }
+    #partFilter:focus, #blockFilter:focus { border-color: var(--accent-line); }
+    #partFilter::placeholder, #blockFilter::placeholder { color: var(--fg-dim); }
     .parts { display: flex; flex-direction: column; margin: 6px -4px 0; }
     .part { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto 34px; align-items: center; gap: 4px; height: 24px; padding: 0 4px; border-radius: 4px; cursor: default; }
     .part:hover, .part.sel { background: var(--raised); }
@@ -130,6 +130,13 @@
     .part:hover .solo { border-color: var(--line); }
     .part .solo[aria-pressed="true"] { color: #fff; background: var(--accent-bg); border-color: var(--accent-line); }
     .part.none { display: none; }
+    /* Blocks: the same rows as Parts, under two headings (Kinds, Types); a type row has its item's icon and its mod. */
+    .part .ic { display: inline-block; width: 14px; height: 14px; margin-right: 6px; vertical-align: -2px; border-radius: 2px; background: var(--raised); }
+    .part .ic[src] { background: none; }
+    .part .mod { color: var(--fg-dim); font-size: 11px; }
+    .subh { margin: 9px 4px 1px; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-dim); }
+    #typesMore { margin: 4px 0 0; height: 22px; padding: 0 8px; font-size: 11px; color: var(--fg-key); background: transparent; border-color: transparent; }
+    #typesMore:hover { border-color: var(--line); }
 
     /* Properties: a key/value list with only the rows that have something to say. */
     .props { display: grid; grid-template-columns: 52px minmax(0, 1fr); column-gap: 8px; row-gap: 3px; align-items: start; margin-top: 2px; }
@@ -362,6 +369,20 @@
           <div class="parts" id="parts"></div>
         </div>
       </details>
+      <details class="grp" id="blocksGrp" open>
+        <summary title="The file's blocks by kind (redstone, lighting, terrain, the roof…) and by type (oak stairs, stone…): hover to light them up, click the eye to hide them, solo to see them alone, click the name to fly to them. They add to the parts: a block shows when its part, its kinds and its type all do"><h2>Blocks <span class="sum" id="blocksSum"></span></h2></summary>
+        <div class="in">
+          <div class="bar">
+            <input id="blockFilter" type="search" placeholder="filter kinds and types… (/)" autocomplete="off" spellcheck="false" />
+            <button id="blocksAll" title="Show every kind and type again">All</button>
+          </div>
+          <div class="subh" id="kindsHead">Kinds</div>
+          <div class="parts" id="kinds"></div>
+          <div class="subh" id="typesHead">Types</div>
+          <div class="parts" id="types"></div>
+          <button id="typesMore"></button>
+        </div>
+      </details>
       <details class="grp" id="matsGrp" open>
         <summary title="What the blocks in view take: the layers, the shell and the parts shown, unless the list is pinned. Hover a row to light its blocks up"><h2>Materials <span class="sum" id="matsSum"></span></h2></summary>
         <div class="in">
@@ -531,6 +552,7 @@
       <dt><kbd>PgUp</kbd> <kbd>PgDn</kbd> or <kbd>[</kbd> <kbd>]</kbd></dt><dd>step a layer</dd>
       <dt><kbd>C</kbd></dt><dd>copy the pinned block (file, coordinates, block, part, link)</dd>
       <dt><kbd>M</kbd></dt><dd>the materials list</dd>
+      <dt><kbd>/</kbd></dt><dd>find a kind or type of block</dd>
       <dt><kbd>Esc</kbd></dt><dd>unpin the block, close this</dd>
       <dt><kbd>H</kbd></dt><dd>collapse the panel</dd>
       <dt><kbd>?</kbd></dt><dd>this reference</dd>

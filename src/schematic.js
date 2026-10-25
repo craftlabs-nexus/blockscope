@@ -38,9 +38,6 @@ async function toSponge(bytes) {
   try { return w.to_schematic(); } finally { w.free?.(); }
 }
 
-/** The shell roles in the order of their cell group numbers (cellGroups): roof 1, wall 2, floor 3. */
-export const SHELL_ROLES = ["roof", "wall", "floor"];
-
 // the blocks whose `facing` is their front (Fit turns to them), and how much each counts
 const FRONT_WEIGHTS = [[/_drawers_|blockscope:framed_(?!trim)|:controller$/, 2], [/chest|barrel|furnace|smoker/, 1], [/wall_sign/, 0.5]];
 
@@ -149,22 +146,17 @@ export class Schematic {
     return { parts, counts, roofCover: Math.round((counts.roof / (this.perLayer || 1)) * 100) / 100 };
   }
 
-  /**
-   * Each cell's group as the renderer takes it (one a cell, in the file's order), for hiding parts and the shell
-   * without loading the file again: 4 × (the part's place in `partNames` + 1, 0 for no part) + its shell role
-   * (`shellCells`: 1 roof, 2 wall, 3 floor, 0 none).
-   */
-  cellGroups(meta, partNames, shellCells) {
+  /** Each cell's part (one a cell, in the file's order): its place in `partNames` + 1, 0 for no part. */
+  partIndex(meta, partNames) {
     const out = new Uint16Array(this.data.length);
     const place = new Map(partNames.map((n, i) => [n, i + 1]));
     if (meta instanceof BlockMeta && meta.alignedWith(this.offset, [this.width, this.height, this.length])) {
       // a record's part once, then a typed-array pass over the cells
-      const group = meta.mapRecords((m) => (place.get(partOf(m)) ?? 0) * 4);
-      for (let i = 0; i < out.length; i++) { const r = meta.cells[i]; if (r) out[i] = group[r - 1]; }
+      const at = meta.mapRecords((m) => place.get(partOf(m)) ?? 0);
+      for (let i = 0; i < out.length; i++) { const r = meta.cells[i]; if (r) out[i] = at[r - 1]; }
     } else if (meta) {
-      for (let i = 0; i < out.length; i++) { const at = place.get(partOf(this.metaAtIndex(meta, i))); if (at) out[i] = at * 4; }
+      for (let i = 0; i < out.length; i++) out[i] = place.get(partOf(this.metaAtIndex(meta, i))) ?? 0;
     }
-    for (const [i, role] of shellCells) out[i] += SHELL_ROLES.indexOf(role) + 1;
     return out;
   }
 

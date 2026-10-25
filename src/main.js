@@ -5,8 +5,9 @@ import { SchematicRenderer } from "@craftlabs/schematic-renderer";
 import * as THREE from "three";
 import JSZip from "jszip";
 import { analyzeFolder, analyzePackZip, detectPackZip, fromFileList } from "@craftlabs/packrat";
-import { Schematic, SHELL_ROLES } from "./schematic.js";
-import { partOf, partsOf, shellPart } from "./parts.js";
+import { Schematic } from "./schematic.js";
+import { classify, typesOf, codeGroups, HiddenCells, KINDS, KIND_BIT, REDSTONE_REASONS, kindsOfMask } from "./kinds.js";
+import { partOf, partsOf } from "./parts.js";
 import { framedRealId } from "./framed.js";
 import { decoratedRealId, DYES } from "./decorated.js";
 import { buildPaintings } from "./paintings.js";
@@ -52,27 +53,79 @@ let shellCells = new Map();   // block index -> roof | wall | floor
 const roofHiddenByDefault = () => info.roofCover >= ROOF_HIDE_COVER;
 const roofOff = () => !shell.roof;
 const hiddenParts = () => Object.keys(shell).filter((p) => !shell[p]);
-// Parts: the file's logical pieces from its metadata, each shown or hidden; a hidden part's blocks are air in the file
-// the renderer gets. ?part=a,b opens with only those parts shown, ?hidePart=a,b with those hidden.
+// Parts: the file's logical pieces from its metadata, each shown or hidden. ?part=a,b opens with only those parts
+// shown, ?hidePart=a,b with those hidden.
 const hiddenPartSet = new Set();
-const shellOfMeta = shellPart;
+// Kinds and types (kinds.js), the Blocks group's two lists: filters beside the parts. A cell is drawn when its part is
+// shown, none of its kinds is hidden (with kinds picked by solo: when it is of one of them) and its type is shown. The
+// shell kinds (roof, walls, floor) are the View group's toggles: `shell` holds them for both. ?kind=a,b shows only
+// those kinds, ?hideKind=a,b hides them; ?type=id,… and ?hideType=id,… the same for types.
+let blocks = { kinds: null, types: null };   // classify() and typesOf() of the file
+const hiddenKinds = new Set(), onlyKinds = new Set(), hiddenTypes = new Set();
+const SHELL_KEYS = ["roof", "wall", "floor"];
+const maskOf = (keys) => { let m = 0; for (const k of keys) m |= KIND_BIT[k] ?? 0; return m; };
+const shellHiddenMask = () => maskOf(SHELL_KEYS.filter((k) => !shell[k]));
+/** Whether a kind's blocks are drawn, as far as the kinds go. */
+const kindShown = (k) => (onlyKinds.size ? onlyKinds.has(k) : !hiddenKinds.has(k)) && (!(k in shell) || shell[k]);
+const kindName = (k) => KINDS.find((x) => x.key === k)?.name ?? k;
+const kindCount = (k) => blocks.kinds?.counts[KINDS.findIndex((x) => x.key === k)] ?? 0;
+const typeOf = (id) => blocks.types?.types.find((t) => t.id === id) ?? null;
+// a type as a link spells it: the id, or the name without "minecraft:"
+const typeId = (s) => (String(s).includes(":") ? String(s) : `minecraft:${s}`);
 // whether a cell (world coordinates) is hidden, for the overlays the page draws itself (paintings hang on a block)
 const cellHidden = (x, y, z) => {
-  const m = meta?.at(x, y, z); if (!m) return false;
-  const sp = shellOfMeta(m);
-  if (sp && !shell[sp]) return true;
-  const p = partOf(m); return !!p && hiddenPartSet.has(p);
+  if (!file) return false;
+  const [ox, oy, oz] = info.offset, fx = x - ox, fy = y - oy, fz = z - oz;
+  if (fx < 0 || fy < 0 || fz < 0 || fx >= info.width || fy >= info.height || fz >= info.length) return false;
+  return hiddenCells().has(file.schem.index(fx, fy, fz));
 };
-let hiddenCache = { key: null, set: null };
-/** The block indices turned to air: the hidden shell parts and the hidden parts. */
+/** What hides what, as a key for the caches below. */
+const filterKey = () => [hiddenParts(), [...hiddenPartSet].sort(), [...hiddenKinds].sort(), [...onlyKinds].sort(), [...hiddenTypes].sort()].map((l) => l.join(",")).join("|");
+let flagsCache = { file: null, key: null, flags: null, cells: null };
+/** Which cell groups are hidden now (one byte a group of cellGroupsNow's table): a hidden part, kind or type. */
+function groupFlagsNow() {
+  const key = filterKey();
+  if (flagsCache.file === file && flagsCache.key === key) return flagsCache.flags;
+  const c = codedNow(), partHidden = new Uint8Array(info.parts.length + 1);
+  info.parts.forEach((p, i) => { if (hiddenPartSet.has(p.name)) partHidden[i + 1] = 1; });
+  const typeHidden = typeHiddenFlags(), hid = maskOf(hiddenKinds) | shellHiddenMask(), only = maskOf(onlyKinds);
+  const flags = new Uint8Array(c.size);
+  for (let g = 1; g < c.size; g++) {
+    const k = c.kinds[g];
+    if (partHidden[c.part[g]] || k & hid || (only && !(k & only)) || (c.typed && typeHidden[c.type[g]])) flags[g] = 1;
+  }
+  flagsCache = { file, key, flags, cells: null };
+  return flags;
+}
+/** Each type's hidden flag, by type index + 1. */
+function typeHiddenFlags() {
+  const types = blocks.types?.types ?? [], out = new Uint8Array(types.length + 1);
+  types.forEach((t, i) => { if (hiddenTypes.has(t.id)) out[i + 1] = 1; });
+  return out;
+}
+/** Whether a type is hidden that the cell groups do not tell apart (a file of too many combinations): the file the
+ *  renderer gets then leaves it out. */
+const typesOutsideGroups = () => hiddenTypes.size > 0 && !codedNow().typed;
+/** The block indices hidden: the hidden shell, parts, kinds and types, as a lookup by cell group (not a list, so a
+ *  million hidden terrain blocks cost nothing to name). */
 function hiddenCells() {
-  const key = `${hiddenParts().join(",")}|${[...hiddenPartSet].sort().join(",")}`;
-  if (hiddenCache.key === key) return hiddenCache.set;
-  // the cells of the hidden groups (each cell's part and shell role: cellGroupsNow), listed once per file
-  const gone = new Set(), lists = groupCellsNow();
-  for (const g of hiddenGroupsNow()) { const cells = lists.get(g); if (cells) for (const i of cells) gone.add(i); }
-  hiddenCache = { key, set: gone };
-  return gone;
+  groupFlagsNow();
+  if (flagsCache.cells) return flagsCache.cells;
+  const c = codedNow(), s = file.schem;
+  let extra = null;
+  if (typesOutsideGroups()) { const th = typeHiddenFlags(), of = blocks.types.ofPalette; extra = (i) => th[of[s.data[i]]] === 1; }
+  return (flagsCache.cells = new HiddenCells(c.groups, flagsCache.flags, extra));
+}
+/** What hides a cell (file index), in words ("roof", "part Aisle 1", "kind terrain", "type stone"); null when drawn. */
+function hiddenWhy(i) {
+  if (!file || !hiddenCells().has(i)) return null;
+  const c = codedNow(), g = c.groups[i], k = c.kinds[g];
+  const sh = SHELL_KEYS.find((r) => k & KIND_BIT[r] && !shell[r]); if (sh) return sh;
+  const pn = info.parts[c.part[g] - 1]?.name; if (pn && hiddenPartSet.has(pn)) return `part ${pn}`;
+  const hk = [...hiddenKinds].find((x) => k & KIND_BIT[x]); if (hk) return `kind ${kindName(hk).toLowerCase()}`;
+  if (onlyKinds.size && !(k & maskOf(onlyKinds))) return `only ${[...onlyKinds].map((x) => kindName(x).toLowerCase()).join(", ")} shown`;
+  const t = blocks.types.types[blocks.types.ofPalette[file.schem.data[i]] - 1];
+  return t && hiddenTypes.has(t.id) ? `type ${t.name}` : "hidden";
 }
 // the cells of each cell group, worked out once per file (a counting sort of cellGroupsNow)
 let groupCellsCache = { file: null, lists: null };
@@ -109,15 +162,16 @@ function setFile(f, { fromUrl = false } = {}) {
     : "A file opened from disk cannot be linked: a link could not bring it back";
   showDownloads(f);
   const s = f.schem, { counts, parts, roofCover } = s.shellOf(meta);
-  shellCells = parts; hiddenCache = { key: null, set: null }; partCells.clear(); frontCache = { name: null, dir: null };
+  shellCells = parts; rowCells.clear(); frontCache = { name: null, dir: null };
   Object.assign(info, s.info(), { shell: counts, roofCover, meta: meta !== null, parts: meta ? partsOf(meta, own ? s.partOrder : null) : [] });
+  blocks = { kinds: classify(s, { shellCells, meta }), types: typesOf(s) };
   // the pack source for this file (its own mod list, unless the visitor gave their own pack)
   const before = source; pickSource(); if (source !== before) { packReport = null; renderPackInfo(); }
   signAt.clear(); for (const sg of s.signs) signAt.set(`${sg.x},${sg.y},${sg.z}`, sg);
   // the shell and the parts: from the link on the first load, else the defaults (the roof hidden when it covers most
   // of the footprint)
   Object.assign(shell, { roof: true, wall: true, floor: true });
-  hiddenPartSet.clear();
+  hiddenPartSet.clear(); hiddenKinds.clear(); onlyKinds.clear(); hiddenTypes.clear(); typesAll = false;
   layer.mode = "all"; layer.cur = Math.max(0, info.height - 2);
   if (fromUrl) {
     if (params.get("hide") !== null) { for (const p of params.get("hide").split(",")) if (p in shell) shell[p] = false; }
@@ -126,6 +180,12 @@ function setFile(f, { fromUrl = false } = {}) {
     const names = info.parts.map((p) => p.name);
     if (params.get("part") !== null) { const keep = new Set(params.get("part").split(",")); for (const n of names) if (!keep.has(n)) hiddenPartSet.add(n); }
     if (params.get("hidePart") !== null) for (const n of params.get("hidePart").split(",")) if (names.includes(n)) hiddenPartSet.add(n);
+    // kinds and types (the shell's kinds are the shell toggles: ?hideKind=roof is ?hide=roof)
+    for (const k of (params.get("kind") ?? "").split(",")) if (k in KIND_BIT) { onlyKinds.add(k); if (k in shell) shell[k] = true; }
+    for (const k of (params.get("hideKind") ?? "").split(",")) if (k in shell) shell[k] = false; else if (k in KIND_BIT) hiddenKinds.add(k);
+    const ids = blocks.types.types.map((t) => t.id);
+    if (params.get("type") !== null) { const keep = new Set(params.get("type").split(",").map(typeId)); for (const id of ids) if (!keep.has(id)) hiddenTypes.add(id); }
+    for (const id of (params.get("hideType") ?? "").split(",").filter(Boolean).map(typeId)) if (ids.includes(id)) hiddenTypes.add(id);
     const ul = (params.get("layer") ?? "").match(/^(single|below|above),(-?\d+)$/);
     if (ul) { layer.mode = ul[1]; layer.cur = Number(ul[2]); }
     const c = (params.get("cam") ?? "").split(",").map(Number);
@@ -148,7 +208,7 @@ function setFile(f, { fromUrl = false } = {}) {
     // ?digits=on / ?digits=off: signal digits set to that once the file is drawn (none: the visitor's own choice)
     digitsWanted = /^(on|off)$/.test(params.get("digits") ?? "") ? params.get("digits") === "on" : null;
   } else { shell.roof = !roofHiddenByDefault(); savedView.on = false; userMoved = false; pinned.wanted = null; focusWanted = null; }
-  applyLayers(); showShellState(); renderParts(); showBlock(null);
+  applyLayers(); showShellState(); renderParts(); renderBlocks(); showBlock(null);
   mats.fileChanged();
 }
 /** Reads a schematic file's bytes into the page's file record. */
@@ -188,31 +248,30 @@ const loaded = { file: null, hidden: null, live: true, cut: false };   // cut: t
 const schematicObject = () => renderer?.schematicManager?.getSchematic?.(SCHEM_ID) ?? renderer?.schematicManager?.getFirstSchematic?.();
 /** The layers drawn as the renderer takes them (minY..maxY-1), null for all. */
 const rangeNow = () => (layer.mode === "all" ? null : { minY: layer.lo, maxY: layer.hi + 1 });
-// each cell's group: 4 × (its part's place in the Parts list + 1, 0 for none) + its shell role (1 roof, 2 wall, 3 floor)
-let groupsCache = { file: null, groups: null };
-function cellGroupsNow() {
-  if (groupsCache.file !== file) groupsCache = { file, groups: file.schem.cellGroups(meta, info.parts.map((p) => p.name), shellCells) };
-  return groupsCache.groups;
-}
-/** The cell groups of the hidden parts and shell roles. */
-function hiddenGroupsNow() {
-  const out = [];
-  for (let part = 0; part <= info.parts.length; part++) {
-    const partHidden = part > 0 && hiddenPartSet.has(info.parts[part - 1].name);
-    for (let role = 0; role < 4; role++) if (partHidden || (role > 0 && !shell[SHELL_ROLES[role - 1]])) out.push(part * 4 + role);
+// each cell's group: the place of its (part, kinds, type) in the table of the combinations the file has (kinds.js
+// codeGroups), worked out once per file
+let groupsCache = { file: null, coded: null };
+function codedNow() {
+  if (groupsCache.file !== file) {
+    const s = file.schem, part = s.partIndex(meta, info.parts.map((p) => p.name));
+    groupsCache = { file, coded: codeGroups(s, part, blocks.kinds.mask, blocks.types.ofPalette) };
   }
-  return out;
+  return groupsCache.coded;
 }
+const cellGroupsNow = () => codedNow().groups;
+/** The cell groups hidden now. */
+function hiddenGroupsNow() { const f = groupFlagsNow(), out = []; for (let g = 1; g < f.length; g++) if (f[g]) out.push(g); return out; }
 /** Whether the renderer can show what is asked for from the file it holds. */
-const canShowNow = (so) => loaded.live && !!so?.showCells && loaded.file === file;
-/** The file as the renderer gets it now: all of it, or (not live) the hidden shell and parts as air and the layer range. */
+const canShowNow = (so) => loaded.live && !loaded.cut && !!so?.showCells && loaded.file === file && !typesOutsideGroups();
+/** The file as the renderer gets it now: all of it, or (not live) the hidden cells as air and the layer range. */
 function renderBytes() {
-  loaded.file = file; loaded.hidden = hiddenCells(); loaded.cut = !loaded.live;
-  const cut = loaded.live ? {} : { hidden: loaded.hidden, ...(rangeNow() ?? {}) };
+  const cutNow = !loaded.live || typesOutsideGroups();
+  loaded.file = file; loaded.hidden = hiddenCells(); loaded.cut = cutNow;
+  const cut = cutNow ? { hidden: loaded.hidden, ...(rangeNow() ?? {}) } : {};
   return file.schem.render(cut).then((u8) => u8.buffer);
 }
 /** What the renderer takes with a file: the cell groups and what to show, when it can. */
-const loadProps = () => (loaded.live ? { layerRange: rangeNow(), cellGroups: cellGroupsNow(), hiddenGroups: hiddenGroupsNow() } : {});
+const loadProps = () => (loaded.live && !typesOutsideGroups() ? { layerRange: rangeNow(), cellGroups: cellGroupsNow(), hiddenGroups: hiddenGroupsNow() } : {});
 // the layers that hold a block once the hidden shell and parts are air (the layer steps skip the rest)
 let filledCache = { file: null, hidden: null, ys: [] };
 function filledNow() {
@@ -236,9 +295,9 @@ function applyLayers() {
   sl.title = all ? "Drag to look at one layer and everything below it" : `Layer ${layer.cur} of the file: world y ${worldY(layer.cur)}; drag, or step with the arrows`;
   const y = $("layerY"); y.textContent = all ? "all" : `y ${worldY(layer.cur)}`; y.classList.toggle("dim", all);
   $("layerRange").textContent = info.height ? `y ${worldY(lo)}..${worldY(hi)} · ${hi - lo + 1} of ${info.height}` : "—";
-  const off = hiddenParts();
-  $("layerHidden").textContent = off.length ? `no ${off.join(", ")}` : "";
-  $("layerSum").textContent = info.height ? (all ? (off.length ? `all, no ${off.join(", ")}` : "all") : `${layer.mode} y ${worldY(layer.cur)}`) : "";
+  const off = hiddenParts(), words = [off.length ? `no ${off.join(", ")}` : "", ...blockWords()].filter(Boolean).join(" · ");
+  $("layerHidden").textContent = words;
+  $("layerSum").textContent = info.height ? (all ? (words ? `all, ${words}` : "all") : `${layer.mode} y ${worldY(layer.cur)}`) : "";
   for (const m of ["All", "Single", "Below", "Above"]) $(`layer${m}`).setAttribute("aria-pressed", String(layer.mode === m.toLowerCase()));
   if (!capture.on) mats.scopeChanged();
 }
@@ -253,7 +312,7 @@ const mats = createMaterials({
   worldY,
   scope() {
     const all = layer.mode === "all", lo = all ? 0 : layer.lo, hi = all ? Math.max(0, info.height - 1) : layer.hi;
-    const chips = [all ? "all layers" : lo === hi ? `y ${worldY(lo)}` : `y ${worldY(lo)}..${worldY(hi)}`, ...hiddenParts().map((p) => `no ${p}`)];
+    const chips = [all ? "all layers" : lo === hi ? `y ${worldY(lo)}` : `y ${worldY(lo)}..${worldY(hi)}`, ...hiddenParts().map((p) => `no ${p}`), ...blockWords()];
     if (hiddenPartSet.size) chips.push(`${info.parts.length - hiddenPartSet.size} of ${info.parts.length} parts`);
     return { lo, hi, hidden: file ? hiddenCells() : new Set(), chips };
   },
@@ -262,7 +321,18 @@ const mats = createMaterials({
   singleLayer(y) { layer.mode = "single"; layer.cur = y; reloadLayers(`layer ${y}`); },
   status: (t, k) => status(t, k),
   download: (blob, name) => download(blob, name),
+  iconsChanged: () => renderBlocks(),
 });
+/** What the Blocks group hides, in words: "only redstone", "no terrain, trees", "3 types hidden". */
+function blockWords() {
+  const out = [], lower = (k) => kindName(k).toLowerCase();
+  if (onlyKinds.size) out.push(`only ${[...onlyKinds].map(lower).join(", ")}`);
+  else if (hiddenKinds.size) out.push(`no ${[...hiddenKinds].map(lower).join(", ")}`);
+  const st = soloedType();
+  if (st) out.push(`only ${typeOf(st)?.name ?? st}`);
+  else if (hiddenTypes.size) out.push(`${hiddenTypes.size} type${hiddenTypes.size === 1 ? "" : "s"} hidden`);
+  return out;
+}
 // the recipe book rides in the pack (pack/build.js writes it): read once per pack, with the pack's textures for icons
 let packZipCache = { name: null, zip: null }, bookPack = null;
 async function packZip(name) {
@@ -352,23 +422,45 @@ const pinned = { cell: null, wanted: null };
 let focusWanted = null;   // a link's ?focus= ({ block: [x, y, z] } world, or { part }), applied once the view settles
 let digitsWanted = null;   // a link's ?digits= (true or false), applied once the file is drawn
 function placeBox(which, cell) { attachMarks(); const box = which === "pin" ? pinBox : hoverBox; if (!box) return; if (!cell) { box.visible = false; } else { box.position.set(...cellCenter(cell.x, cell.y, cell.z)); box.visible = true; } redraw(); }
-// a part's cells (file coordinates, and the shell role) from the cell groups' lists (groupCellsNow: worked out once
-// per file), once per part; the ghost shows the ones in the layer range whose shell part is not hidden (a hidden part
-// still shows, that is what the ghost is for)
-const partCells = new Map();
-function cellsOfPart(name) {
-  if (partCells.has(name)) return partCells.get(name);
-  const out = [], at = info.parts.findIndex((p) => p.name === name) + 1, lists = groupCellsNow();
-  if (at > 0) for (let role = 0; role < 4; role++) for (const i of lists.get(at * 4 + role) ?? []) out.push([...file.schem.cellOf(i), role ? SHELL_ROLES[role - 1] : null]);
-  partCells.set(name, out); return out;
+// A row's cells (a part, a kind or a type: { axis: "part" | "kind" | "type", key }) as file indices, from the cell
+// groups' lists (groupCellsNow: worked out once per file), once per row and file.
+const rowCells = new Map();
+function cellsOfRow(row) {
+  const id = `${row.axis}:${row.key}`;
+  if (rowCells.has(id)) return rowCells.get(id);
+  const c = codedNow(), lists = groupCellsNow();
+  let out = null, test = () => false;
+  if (row.axis === "part") { const at = info.parts.findIndex((p) => p.name === row.key) + 1; if (at > 0) test = (g) => c.part[g] === at; }
+  else if (row.axis === "kind") { const bit = KIND_BIT[row.key] ?? 0; test = (g) => (c.kinds[g] & bit) !== 0; }
+  else {
+    const t = (blocks.types?.types.findIndex((x) => x.id === row.key) ?? -1) + 1;
+    if (t && c.typed) test = (g) => c.type[g] === t;
+    else if (t) { const of = blocks.types.ofPalette, d = file.schem.data, idx = []; for (let i = 0; i < d.length; i++) if (of[d[i]] === t) idx.push(i); out = Int32Array.from(idx); }
+  }
+  if (!out) {
+    const parts = []; let n = 0;
+    for (let g = 1; g < c.size; g++) if (test(g)) { const l = lists.get(g); if (l) { parts.push(l); n += l.length; } }
+    out = new Int32Array(n); let o = 0; for (const l of parts) { out.set(l, o); o += l.length; }
+  }
+  rowCells.set(id, out); return out;
 }
-function showGhost(name) {
+/** A row's cells in the layers drawn, less the hidden shell (a row's own shell kind still shows, and a hidden part,
+ *  kind or type too: lighting it up is what the hover is for). */
+function shownCellsOfRow(row) {
+  const [lo, hi] = shownRange(), per = file.schem.perLayer, c = codedNow();
+  const sh = shellHiddenMask() & ~(row.axis === "kind" ? KIND_BIT[row.key] ?? 0 : 0), out = [];
+  for (const i of cellsOfRow(row)) { const y = Math.floor(i / per); if (y >= lo && y <= hi && !(c.kinds[c.groups[i]] & sh)) out.push(i); }
+  return out;
+}
+// past this many blocks a row lights up every few of them (the terrain: a million boxes would stall the page)
+const GHOST_MAX = 60000;
+function showGhost(row) {
   hideGhost();
-  if (!name || !meta) return;
-  const [lo, hi] = shownRange();
-  const cells = cellsOfPart(name).filter(([, y, , sp]) => y >= lo && y <= hi && !(sp && !shell[sp]));
+  if (!row || !file) return;
+  let cells = shownCellsOfRow(row);
   if (!cells.length) return;
-  ghost = cellsMesh(cells, ghostMat);
+  if (cells.length > GHOST_MAX) { const step = Math.ceil(cells.length / GHOST_MAX); cells = cells.filter((_, j) => j % step === 0); }
+  ghost = cellsMesh(cells.map((i) => file.schem.cellOf(i)), ghostMat);
   markGroup.add(ghost); redraw();
 }
 /** A translucent box on each of `cells` (file coordinates), one instanced mesh: a part's ghost, a material's blocks. */
@@ -544,7 +636,7 @@ async function startRenderer() {
           // a build that cannot show some cells (or a renderer without it), or a whole file from before that was
           // found out, while something is hidden: the file is loaded again with only what is drawn
           const so = schematicObject();
-          const cutWanted = !!rangeNow() || hiddenGroupsNow().length > 0;
+          const cutWanted = !!rangeNow() || hiddenGroupsNow().length > 0 || typesOutsideGroups();
           if (loaded.live && !(so?.canShowLayerRange?.() ?? false)) loaded.live = false;
           if (!loaded.live && !loaded.cut && cutWanted) { reloadLayers("what is drawn"); return; }
           status(capture.after ?? `rendered ${schemName}${source.none && wantedNamespaces(file.schem).length ? ": it lists no mods, so its modded blocks need your own pack (File, Resource pack)" : ""}`); capture.after = null; pinGroup(); renderUnknown(); buildOverlayPaintings(); tuneControls(); keepBackground();
@@ -840,7 +932,7 @@ function showTip(d) {
   if (!d) { hideTip(); return; }
   tip.querySelector(".id").textContent = d.id.replace(/^minecraft:/, "");
   tip.querySelector(".st").textContent = d.state.length ? d.state.map(([k, v]) => `${k}=${v}`).join("  ") : "";
-  tip.querySelector(".pt").textContent = d.part ? [d.part.item && itemText(d.part.item), d.part.owner, d.part.role].filter(Boolean).join(" · ") : d.extra ? d.extra.kind : "";
+  tip.querySelector(".pt").textContent = [d.part ? [d.part.item && itemText(d.part.item), d.part.owner, d.part.role].filter(Boolean).join(" · ") : d.extra ? d.extra.kind : "", kindsText(d)].filter(Boolean).join(" · ");
   // the item the block is placed from (the file's own block, so a framed drawer reads as the mod's), and how many
   tip.querySelector(".mt").textContent = d.cell && !d.hidden && file ? mats.describeKey(file.schem.idAt(file.schem.index(d.cell.x, d.cell.y, d.cell.z))) : "";
   tip.querySelector(".pos").textContent = d.pos.replace(/\s+\(file.*$/, "");
@@ -876,18 +968,19 @@ function describeBlock(so, x, y, z) {
     const state = b ? Object.entries(b.properties()) : [];
     const [ox, oy, oz] = info.offset;
     const part = meta?.at(x + ox, y + oy, z + oz) ?? null;   // the generator keys by world position (file position + offset)
-    // a block of a hidden shell part or part: the renderer holds it but does not draw it (or, where it cannot, it is
-    // air in the file it has); say what hides it
-    const sp = part ? shellOfMeta(part) : null, pn = part ? partOf(part) : null;
-    const hidden = sp && !shell[sp] ? sp : pn && hiddenPartSet.has(pn) ? `part ${pn}` : null;
+    // a hidden block: the renderer holds it but does not draw it (or, where it cannot, it is air in the file it has);
+    // say what hides it. Its kinds, and why it is Redstone when it is so only by a neighbour.
+    const ci = file.schem.index(x, y, z), hidden = hiddenWhy(ci);
     if (hidden) id = `${id === "minecraft:air" ? "air" : id} (hidden ${hidden})`;
+    const why = REDSTONE_REASONS[blocks.kinds?.reason[ci] ?? 0];
+    const kinds = kindsOfMask(blocks.kinds?.mask[ci] ?? 0).map((k) => ({ kind: k, why: k === "redstone" && why !== "a component" ? why : null }));
     // what the file and the page know about it: a sign's text (dye, glow, waxed, back side), a painting on this block;
     // `quote` is the short form a copy carries (the sign's front text, the painting's label)
     const k = `${x},${y},${z}`, s = signAt.get(k), p = paintingAt.get(k);
     const sideText = (t) => `"${t.lines.filter(Boolean).join(" / ") || " "}" in ${t.color.replace("_", " ")}${t.glow ? ", glowing" : ""}`;
     const extra = s && b ? { kind: "sign", quote: s.lines.filter(Boolean).join(" / "), text: `front ${sideText(s)}${s.back ? `; back ${sideText(s.back)}` : "; back empty"}${s.waxed ? "; waxed (no edits)" : ""}` }
       : p ? { kind: "painting", quote: p.label, text: `Immersive Painting "${p.label}", ${p.w}×${p.h} blocks, ${p.img.replace(/^paintings\//, "")}, facing ${({ N: "north", S: "south", E: "east", W: "west" })[p.dir] ?? p.dir}; hangs on this block (placed by hand, not in the file)` } : null;
-    return { id, state, pos: `x ${x + ox}  y ${y + oy}  z ${z + oz}  (file ${x},${y},${z})`, part, extra, frame: frame ?? part?.frame ?? null, hidden, cell: { x, y, z }, world: [x + ox, y + oy, z + oz] };
+    return { id, state, pos: `x ${x + ox}  y ${y + oy}  z ${z + oz}  (file ${x},${y},${z})`, part, extra, frame: frame ?? part?.frame ?? null, hidden, kinds, cell: { x, y, z }, world: [x + ox, y + oy, z + oz] };
   } catch (e) { return { id: `could not read the block: ${e.message}`, state: [], pos: "", part: null, extra: null, frame: null, hidden: null, cell: null, world: null }; }
 }
 // A block as plain text to paste anywhere: the file and where it is (world, then file coordinates), the block in
@@ -922,7 +1015,9 @@ function pinWorld(wx, wy, wz) {
   if (x < 0 || y < 0 || z < 0 || x >= info.width || y >= info.height || z >= info.length) return false;
   showBlock(describeBlock(so, x, y, z)); return true;
 }
-const itemText = (s) => (s.includes("/") ? s : s.replace(/minecraft:/g, ""));   // ids without the namespace; a rule list (regexes) as is
+const itemText = (s) => (s.includes("/") ? s : s.replace(/minecraft:/g, ""));
+// a block's kinds in words: "redstone (holds a component), storage"
+const kindsText = (d) => (d.kinds ?? []).map((k) => `${kindName(k.kind).toLowerCase()}${k.why ? ` (${k.why})` : ""}`).join(", ");   // ids without the namespace; a rule list (regexes) as is
 // The Block group is a properties list: only the rows that have something to say, the block's id first, its state as
 // key/value chips, the position, the sign or painting on it, then the metadata (item, frame, owner, role) and a link
 // to its part in the Parts list. Nothing is pinned: a one-line prompt instead.
@@ -953,6 +1048,16 @@ function showBlock(d) {
   const pn = d.part ? partOf(d.part) : null;
   if (pn && info.parts.some((p) => p.name === pn)) row("part", "", (v) => { const a = document.createElement("a"); a.className = "lnk"; a.textContent = pn; a.title = "Show this part in the Parts list"; a.onclick = () => revealPartRow(pn); v.append(a); });
   else if (!d.part && meta) row("part", "dim", meta.count ? "not in the metadata" : "no metadata for this file");
+  // its type and kinds, each a link to its row in the Blocks list
+  const link = (v, text, title, go) => { const a = document.createElement("a"); a.className = "lnk"; a.textContent = text; a.title = title; a.onclick = go; v.append(a); };
+  const ti = d.cell && file ? blocks.types?.ofPalette[file.schem.data[file.schem.index(d.cell.x, d.cell.y, d.cell.z)]] : 0;
+  const t = ti ? blocks.types.types[ti - 1] : null;
+  if (t && blocks.types.types.length >= 2) row("type", "", (v) => link(v, t.name, "Show this type in the Blocks list", () => revealBlockRow("type", t.id)));
+  if (d.kinds?.length) row("kinds", "", (v) => d.kinds.forEach((k, j) => {
+    if (j) v.append(" · ");
+    const listed = blocks.kinds?.shown && blocks.kinds.listed.includes(k.kind), text = `${kindName(k.kind).toLowerCase()}${k.why ? ` (${k.why})` : ""}`;
+    if (listed) link(v, text, "Show this kind in the Blocks list", () => revealBlockRow("kind", k.kind)); else v.append(text);
+  }));
 }
 // Shell toggles: Roof, Walls and Floor reload the schematic with that part turned to air so the inside is visible.
 // Each button is a toggle, lit while the part is shown; a part the file does not have is disabled.
@@ -977,6 +1082,22 @@ function soloPart(name) {
   hiddenPartSet.clear(); if (!solo) for (const q of info.parts) if (q.name !== name) hiddenPartSet.add(q.name);
   renderParts(); reloadLayers(solo ? "every part" : `only ${name}`);
 }
+/** One row of the Parts, Kinds or Types list: eye (shown or hidden), name, count, solo. Hovering lights its blocks up
+ *  (`ghost`: the row), the name flies to them, the eye hides or shows them, solo shows them alone (again: all). */
+function rowEl({ name, sub = "", count, title, hidden, solo, soloTitle, icon = null, onEye, onSolo, onFly, ghost: row }) {
+  const el = document.createElement("div"); el.className = `part${hidden ? " hid" : ""}`; el.title = title;
+  const eye = document.createElement("button"); eye.className = "eye"; eye.title = hidden ? `Show ${name}` : `Hide ${name}`;
+  const nm = document.createElement("span"); nm.className = "nm";
+  if (icon) { const img = document.createElement("img"); img.className = "ic"; img.alt = ""; icon(img); nm.append(img); }
+  nm.append(name);
+  if (sub) { const m = document.createElement("span"); m.className = "mod"; m.textContent = ` · ${sub}`; nm.append(m); }
+  const cnt = document.createElement("span"); cnt.className = "cnt"; cnt.textContent = count.toLocaleString("en-US");
+  const only = document.createElement("button"); only.className = "solo"; only.textContent = "solo"; only.setAttribute("aria-pressed", String(solo)); only.title = soloTitle;
+  eye.onclick = onEye; only.onclick = onSolo; nm.onclick = onFly;
+  el.onmouseenter = () => showGhost(row); el.onmouseleave = hideGhost;
+  el.append(eye, nm, cnt, only);
+  return el;
+}
 function renderParts() {
   const list = $("parts"), parts = info.parts;
   $("partsGrp").style.display = parts.length ? "" : "none";
@@ -988,34 +1109,127 @@ function renderParts() {
   list.replaceChildren(); partRows.clear();
   for (const p of parts) {
     const hid = hiddenPartSet.has(p.name);
-    const row = document.createElement("div"); row.className = `part${hid ? " hid" : ""}${filter && !p.name.toLowerCase().includes(filter) ? " none" : ""}`;
-    row.title = `${p.name}: ${p.count} blocks, ${hid ? "hidden" : "shown"}. Click the name to fly to it, the eye to ${hid ? "show" : "hide"} it`;
-    const eye = document.createElement("button"); eye.className = "eye"; eye.title = hid ? `Show ${p.name}` : `Hide ${p.name}`;
-    const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = p.name;
-    const cnt = document.createElement("span"); cnt.className = "cnt"; cnt.textContent = String(p.count);
-    const only = document.createElement("button"); only.className = "solo"; only.textContent = "solo"; only.setAttribute("aria-pressed", String(solo === p.name)); only.title = solo === p.name ? "Show every part again" : `Show only ${p.name}`;
-    eye.onclick = () => { if (hiddenPartSet.has(p.name)) hiddenPartSet.delete(p.name); else hiddenPartSet.add(p.name); renderParts(); reloadLayers(`${hiddenPartSet.has(p.name) ? "without" : "with"} ${p.name}`); };
-    only.onclick = () => soloPart(p.name);
-    nm.onclick = () => flyToPart(p.name);
-    row.onmouseenter = () => showGhost(p.name); row.onmouseleave = hideGhost;
-    row.append(eye, nm, cnt, only); list.append(row); partRows.set(p.name, row);
+    const el = rowEl({
+      name: p.name, count: p.count, hidden: hid, solo: solo === p.name, ghost: { axis: "part", key: p.name },
+      title: `${p.name}: ${p.count} blocks, ${hid ? "hidden" : "shown"}. Click the name to fly to it, the eye to ${hid ? "show" : "hide"} it`,
+      soloTitle: solo === p.name ? "Show every part again" : `Show only ${p.name}`,
+      onEye: () => { if (hiddenPartSet.has(p.name)) hiddenPartSet.delete(p.name); else hiddenPartSet.add(p.name); renderParts(); reloadLayers(`${hiddenPartSet.has(p.name) ? "without" : "with"} ${p.name}`); },
+      onSolo: () => soloPart(p.name), onFly: () => flyToPart(p.name),
+    });
+    if (filter && !p.name.toLowerCase().includes(filter)) el.classList.add("none");
+    list.append(el); partRows.set(p.name, el);
   }
 }
 $("partsAll").onclick = () => { if (!hiddenPartSet.size) return; hiddenPartSet.clear(); renderParts(); reloadLayers("every part"); };
 $("partFilter").oninput = renderParts;
 $("partFilter").onkeydown = (ev) => { if (ev.key === "Escape") { ev.target.value = ""; renderParts(); ev.target.blur(); } ev.stopPropagation(); };
 function selectPartRow(name) { for (const [n, r] of partRows) r.classList.toggle("sel", n === name); }
+// The Blocks group: the file's kinds, then its types, in the same rows as Parts. The kinds are left out where they
+// cannot split the file (kinds.js kindsShown), the whole group where there is one type; the types list shows the 40
+// largest until "show all" or a filter.
+const TYPES_SHOWN = 40;
+let typesAll = false;
+const blockRows = new Map();   // "kind:<key>" or "type:<id>" -> its row
+const soloedKind = () => (onlyKinds.size === 1 ? [...onlyKinds][0] : null);
+const soloedType = () => { const t = blocks.types?.types ?? []; return t.length > 1 && hiddenTypes.size === t.length - 1 ? (t.find((x) => !hiddenTypes.has(x.id))?.id ?? null) : null; };
+function renderBlocks() {
+  const k = blocks.kinds, ty = blocks.types?.types ?? [];
+  const showKinds = !!k?.shown, showTypes = ty.length >= 2;
+  $("blocksGrp").style.display = showKinds || showTypes ? "" : "none";
+  blockRows.clear();
+  const filter = $("blockFilter").value.trim().toLowerCase();
+  const kindsOff = showKinds ? k.listed.filter((x) => !kindShown(x)).length : 0;
+  $("blocksSum").textContent = [showKinds && `${k.listed.length} kinds`, `${ty.length} types`, kindsOff + hiddenTypes.size && `${kindsOff + hiddenTypes.size} hidden`].filter(Boolean).join(" · ");
+  $("blocksAll").disabled = !kindsOff && !hiddenTypes.size && !onlyKinds.size;
+  // kinds, most blocks first
+  const kl = $("kinds"); kl.replaceChildren();
+  $("kindsHead").style.display = kl.style.display = showKinds ? "" : "none";
+  const soloK = soloedKind();
+  if (showKinds) for (const key of [...k.listed].sort((a, b) => kindCount(b) - kindCount(a))) {
+    const def = KINDS.find((x) => x.key === key), n = kindCount(key), hid = !kindShown(key), lower = def.name.toLowerCase();
+    const el = rowEl({
+      name: def.name, count: n, hidden: hid, solo: soloK === key, ghost: { axis: "kind", key },
+      title: `${def.name}: ${def.tip}. ${n.toLocaleString("en-US")} blocks, ${hid ? "hidden" : "shown"}${n > GHOST_MAX ? "; hovering lights up every few of them" : ""}`,
+      soloTitle: soloK === key ? "Show every kind again" : `Show only ${lower}`,
+      onEye: () => toggleKind(key), onSolo: () => soloKind(key), onFly: () => flyToRow({ axis: "kind", key }),
+    });
+    if (filter && !lower.includes(filter) && !key.includes(filter)) el.classList.add("none");
+    kl.append(el); blockRows.set(`kind:${key}`, el);
+  }
+  // types: the largest first, the first 40 until "show all"; a filter searches names, ids and mods
+  const tl = $("types"); tl.replaceChildren();
+  $("typesHead").style.display = tl.style.display = showTypes ? "" : "none";
+  const soloT = soloedType();
+  let listed = 0, matching = 0;
+  if (showTypes) for (const t of ty) {
+    if (filter && !t.name.includes(filter) && !t.id.includes(filter) && !(t.mod ?? "").includes(filter)) continue;
+    matching++;
+    if (!filter && !typesAll && listed >= TYPES_SHOWN) continue;
+    listed++;
+    const hid = hiddenTypes.has(t.id);
+    const el = rowEl({
+      name: t.name, sub: t.mod ?? "", count: t.count, hidden: hid, solo: soloT === t.id, ghost: { axis: "type", key: t.id },
+      icon: (img) => mats.iconOfBlock(t.id).then((u) => { if (u) img.src = u; }),
+      title: `${t.id}: ${t.count.toLocaleString("en-US")} blocks, ${hid ? "hidden" : "shown"}. Click the name to fly to them, the eye to ${hid ? "show" : "hide"} them`,
+      soloTitle: soloT === t.id ? "Show every type again" : `Show only ${t.name}`,
+      onEye: () => toggleType(t.id), onSolo: () => soloType(t.id), onFly: () => flyToRow({ axis: "type", key: t.id }),
+    });
+    tl.append(el); blockRows.set(`type:${t.id}`, el);
+  }
+  const more = $("typesMore");
+  more.hidden = !showTypes || filter !== "" || ty.length <= TYPES_SHOWN;
+  more.textContent = typesAll ? "show the first 40" : `${listed} of ${ty.length} types · show all`;
+}
+/** After a kind or type is hidden or shown: the lists, the shell buttons and the view follow. */
+function blocksChanged(what) { showShellState(); renderBlocks(); return reloadLayers(what); }
+function toggleKind(k) {
+  if (onlyKinds.size) { if (onlyKinds.has(k)) onlyKinds.delete(k); else { onlyKinds.add(k); if (k in shell) shell[k] = true; } }
+  else if (k in shell) shell[k] = !shell[k];
+  else if (hiddenKinds.has(k)) hiddenKinds.delete(k); else hiddenKinds.add(k);
+  return blocksChanged(`${kindShown(k) ? "with" : "without"} ${kindName(k).toLowerCase()}`);
+}
+/** Shows only that kind's blocks (with the other filters standing), or every kind again when it is the one shown. */
+function soloKind(k) {
+  const solo = soloedKind() === k;
+  onlyKinds.clear(); hiddenKinds.clear();
+  if (!solo) { onlyKinds.add(k); if (k in shell) shell[k] = true; }
+  return blocksChanged(solo ? "every kind" : `only ${kindName(k).toLowerCase()}`);
+}
+function toggleType(id) {
+  if (hiddenTypes.has(id)) hiddenTypes.delete(id); else hiddenTypes.add(id);
+  return blocksChanged(`${hiddenTypes.has(id) ? "without" : "with"} ${typeOf(id)?.name ?? id}`);
+}
+function soloType(id) {
+  const solo = soloedType() === id;
+  hiddenTypes.clear(); if (!solo) for (const t of blocks.types.types) if (t.id !== id) hiddenTypes.add(t.id);
+  return blocksChanged(solo ? "every type" : `only ${typeOf(id)?.name ?? id}`);
+}
+$("blocksAll").onclick = () => {
+  hiddenKinds.clear(); onlyKinds.clear(); hiddenTypes.clear();
+  for (const k of SHELL_KEYS) if (blocks.kinds?.shown && blocks.kinds.listed.includes(k)) shell[k] = true;
+  blocksChanged("every kind and type");
+};
+$("blockFilter").oninput = renderBlocks;
+$("blockFilter").onkeydown = (ev) => { if (ev.key === "Escape") { ev.target.value = ""; renderBlocks(); ev.target.blur(); } ev.stopPropagation(); };
+$("typesMore").onclick = () => { typesAll = !typesAll; renderBlocks(); };
+function revealBlockRow(axis, key) {
+  $("blocksGrp").open = true; $("blockFilter").value = "";
+  if (axis === "type" && blocks.types.types.findIndex((t) => t.id === key) >= TYPES_SHOWN) typesAll = true;
+  renderBlocks();
+  const r = blockRows.get(`${axis}:${key}`); if (!r) return;
+  for (const x of blockRows.values()) x.classList.toggle("sel", x === r);
+  r.scrollIntoView({ block: "nearest" });
+}
 function revealPartRow(name) { $("partsGrp").open = true; const r = partRows.get(name); if (!r) return; $("partFilter").value = ""; renderParts(); selectPartRow(name); partRows.get(name)?.scrollIntoView({ block: "nearest" }); }
 // Fly to a part: aim the orbit pivot at the middle of its blocks and back the camera off along its current direction
 // far enough to see the whole part. Returns the box flown to (file cells, inclusive), or null.
-function flyToPart(name) {
-  const [lo, hi] = shownRange();
-  let cells = cellsOfPart(name).filter(([, y, , sp]) => y >= lo && y <= hi && !(sp && !shell[sp]));
-  if (!cells.length) cells = cellsOfPart(name); if (!cells.length) return null;
-  const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
-  for (const c of cells) for (let i = 0; i < 3; i++) { min[i] = Math.min(min[i], c[i]); max[i] = Math.max(max[i], c[i]); }
+function flyToRow(row) {
+  let cells = shownCellsOfRow(row); if (!cells.length) cells = cellsOfRow(row); if (!cells.length) return null;
+  const s = file.schem, min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+  for (const i of cells) { const c = s.cellOf(i); for (let a = 0; a < 3; a++) { if (c[a] < min[a]) min[a] = c[a]; if (c[a] > max[a]) max[a] = c[a]; } }
   return flyToBox(min, max) ? { min, max } : null;
 }
+const flyToPart = (name) => flyToRow({ axis: "part", key: name });
 /** Frames the file cells from `min` to `max` (inclusive) as flyToPart does; false before the renderer is up. */
 function flyToBox(min, max) {
   const ctl = controls(), cam = camera(), g = group(); if (!ctl?.target || !cam || !g) return false;
@@ -1084,7 +1298,7 @@ function layersShown() {
 }
 for (const p of Object.keys(shell)) $(`shell-${p}`).onclick = () => {
   shell[p] = !shell[p];
-  showShellState();
+  showShellState(); renderBlocks();
   reloadLayers(shell[p] ? `with the ${p}` : `without the ${p}`);
 };
 // Layer controls: single / below / above the current layer, stepped with the buttons, the slider, PageUp/PageDown
@@ -1526,6 +1740,13 @@ function syncUrl(now = false) {
     // a soloed part is the short form, ?part=name; otherwise the hidden ones are listed
     const solo = soloed(); q.delete("part"); q.delete("hidePart");
     if (solo) q.set("part", solo); else if (hiddenPartSet.size) q.set("hidePart", [...hiddenPartSet].join(","));
+    // kinds picked, or hidden; types shown or hidden, whichever list is shorter
+    for (const k of ["kind", "hideKind", "type", "hideType"]) q.delete(k);
+    if (onlyKinds.size) q.set("kind", [...onlyKinds].join(",")); else if (hiddenKinds.size) q.set("hideKind", [...hiddenKinds].join(","));
+    if (hiddenTypes.size) {
+      const short = (id) => id.replace(/^minecraft:/, ""), shown = blocks.types.types.filter((t) => !hiddenTypes.has(t.id)).map((t) => short(t.id));
+      if (shown.length < hiddenTypes.size) q.set("type", shown.join(",")); else q.set("hideType", [...hiddenTypes].map(short).join(","));
+    }
     if (layer.mode !== "all") q.set("layer", `${layer.mode},${layer.cur}`); else q.delete("layer");
     const c = userMoved ? camText() : ""; if (c) q.set("cam", c); else q.delete("cam");
     if (topView.on) q.set("view", `top,${topView.q},${Math.round((camera()?.zoom ?? 1) * 1000) / 1000}`); else q.delete("view");
@@ -1535,7 +1756,7 @@ function syncUrl(now = false) {
     const pc = pinned.cell, [ox, oy, oz] = info.offset;
     if (pc) q.set("at", `${pc.x + ox},${pc.y + oy},${pc.z + oz}`); else if (!pinned.wanted) q.delete("at");
     // commas as themselves (?at=1,2,3, not 1%2C2%2C3): legal in a query and readable in a pasted link
-    const s = u.toString().replace(/%2C/gi, ","); if (s !== location.href) history.replaceState(null, "", s);
+    const s = u.toString().replace(/%2C/gi, ",").replace(/%3A/gi, ":"); if (s !== location.href) history.replaceState(null, "", s);
   };
   if (now) write(); else urlTimer = setTimeout(write, 400);
 }
@@ -1605,6 +1826,7 @@ addEventListener("keydown", (ev) => {
   else if (k === "c" || k === "C") copyBlock();
   else if (k === "m" || k === "M") mats.toggleSheet();
   else if (k === "?" || (c === "Slash" && ev.shiftKey)) setHelp(!help.classList.contains("on"));
+  else if (k === "/") { if ($("blocksGrp").style.display !== "none") { $("blocksGrp").open = true; $("blockFilter").focus(); } }
   else if (k === "Escape") { if (about.classList.contains("on")) setAbout(false); else if (help.classList.contains("on")) setHelp(false); else if (!mats.close()) showBlock(null); }
   else return;
   ev.preventDefault();
@@ -1685,6 +1907,7 @@ function agentState() {
     file: schemName || null, status: $("status").textContent, error: $("status").className === "err", agent: AGENT,
     size: [info.width, info.height, info.length], origin: [...info.offset],
     parts: info.parts.length, hiddenParts: [...hiddenPartSet], layers: { mode: layer.mode, fileY: shownRange() },
+    kinds: { only: [...onlyKinds], hidden: [...hiddenKinds, ...SHELL_KEYS.filter((k) => !shell[k])] }, hiddenTypes: [...hiddenTypes],
     pinned: pinned.cell ? toWorld([pinned.cell.x, pinned.cell.y, pinned.cell.z]) : null,
     camera: cam ? { position: r(cam.position), target: r(ctl?.target), view: topView.on ? "top" : camPreset } : null,
     pack: currentPack, unknownBlocks: unknown.size, url: location.href,
@@ -1700,7 +1923,7 @@ function findPart(name) {
 function focusPartNow(name, { highlight = false } = {}) {
   const p = findPart(name), box = flyToPart(p.name);
   if (!box) throw new Error(`part ${p.name} has no blocks to fly to`);
-  revealPartRow(p.name); if (highlight) showGhost(p.name);
+  revealPartRow(p.name); if (highlight) showGhost({ axis: "part", key: p.name });
   return { part: p.name, blocks: p.count, from: toWorld(box.min), to: toWorld(box.max) };
 }
 /** Flies to a part (shown first if it was hidden; `solo` hides every other part), lights it up when asked. */
@@ -1716,6 +1939,30 @@ async function focusPart(name, { solo = false, highlight = false } = {}) {
     await settled;
   }
   return focusPartNow(p.name, { highlight });
+}
+const kindList = () => (blocks.kinds?.listed ?? []).map((k) => ({ kind: k, name: kindName(k), blocks: kindCount(k), hidden: !kindShown(k) }));
+const typeList = () => (blocks.types?.types ?? []).map((t) => ({ id: t.id, name: t.name, mod: t.mod, blocks: t.count, hidden: hiddenTypes.has(t.id) }));
+/** Flies to a row's blocks (a kind or a type), selects its row and lights it up when asked. */
+function focusRowNow(row, label, highlight) {
+  const box = flyToRow(row); if (!box) throw new Error(`${label} has no blocks to fly to`);
+  revealBlockRow(row.axis, row.key); if (highlight) showGhost(row);
+  return { [row.axis]: row.key, blocks: cellsOfRow(row).length, from: toWorld(box.min), to: toWorld(box.max) };
+}
+/** Flies to a kind's blocks (shown first if hidden; `solo`: only that kind), lights them up when asked. */
+async function focusKind(key, { solo = false, highlight = false } = {}) {
+  await ready();
+  const k = String(key).toLowerCase(), def = KINDS.find((x) => x.key === k || x.name.toLowerCase() === k);
+  if (!def || !kindCount(def.key)) throw new Error(`${schemName} has no blocks of kind "${key}"; its kinds: ${kindList().map((x) => x.kind).join(", ") || "none"}`);
+  if (solo ? soloedKind() !== def.key : !kindShown(def.key)) { const settled = waitSettle(120000); await (solo ? soloKind(def.key) : toggleKind(def.key)); await settled; }
+  return focusRowNow({ axis: "kind", key: def.key }, def.name, highlight);
+}
+/** Flies to a type's blocks (an id; "stone" is minecraft:stone), as focusKind. */
+async function focusType(id, { solo = false, highlight = false } = {}) {
+  await ready();
+  const t = typeOf(typeId(id));
+  if (!t) throw new Error(`${schemName} has no ${typeId(id)}; its types, most blocks first: ${typeList().slice(0, 30).map((x) => x.id).join(", ")}`);
+  if (solo ? soloedType() !== t.id : hiddenTypes.has(t.id)) { const settled = waitSettle(120000); await (solo ? soloType(t.id) : toggleType(t.id)); await settled; }
+  return focusRowNow({ axis: "type", key: t.id }, t.id, highlight);
 }
 function focusBlockNow(wx, wy, wz, { radius = 3, pin = true } = {}) {
   const [ox, oy, oz] = info.offset, c = [wx - ox, wy - oy, wz - oz];
@@ -1773,13 +2020,14 @@ window.blockscope = {
   hitUnderPointer, schematicMeshes, controls, camera,
   // for agents (AGENTS.md): wait for a render, read the state, find and frame blocks and parts
   ready, nextRender: (timeout = 120000) => waitSettle(timeout), state: agentState, parts: partList, findBlocks, focusPart, focusBlock,
+  kinds: kindList, types: typeList, focusKind, focusType,
   // the materials list (AGENTS.md): list({ preset, group }) as the sheet's JSON export, setHave(item, "2s"), state()
   materials: { list: (o) => mats.list(o), setHave: (id, v) => mats.setHave(id, String(v)), state: () => mats.state(), toggle: () => mats.toggleSheet() },
 };
 window.inspectAt = pinWorld;
 
 // ---- start ----------------------------------------------------------------------------------------------------------
-showShellState(); renderParts(); renderPackInfo();
+showShellState(); renderParts(); renderBlocks(); renderPackInfo();
 {
   const param = params.get("schem") ?? DEFAULT_PLAN;
   const local = import.meta.env.DEV && !params.get("schem") ? params.get("local") : null;

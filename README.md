@@ -39,21 +39,32 @@ one for the Roof toggle and one for Inspect.
   another region's block); anything else, an MCEdit `.schematic`, by the renderer's WASM (Nucleation). The parts, the
   shell and what each block is for come from the generator's metadata in the file (BlockInfo, below), else a
   Litematica file's regions as its parts. The Parts group's tooltip says which.
-- **Changes draw at once.** The renderer holds the whole file, each cell labeled with its part and shell role, and
-  draws the layers, parts and shell asked for without loading the file again (a few milliseconds; a new
+- **Changes draw at once.** The renderer holds the whole file, each cell labeled with its part, kinds and type, and
+  draws the layers, parts, kinds and types asked for without loading the file again (a few milliseconds; a new
   combination's hidden faces, the ones the hidden cells covered, a little longer): only opening another file reloads.
 - **The view.** View (fit to the fronts, perspective, isometric or top: a flat plan straight down, every block the
   same size, drag pans, Q / E turn it a quarter, a block grid; Shot, Build, the shell toggles), Layers (all,
   single, below, above, a slider; PageUp / PageDown or [ ] step to the next layer that changes the view, passing
   over layers with nothing shown), Parts (from the metadata or a Litematica file's regions: hover to light one up,
-  hide, solo, fly to it), Block (click to pin: id, state, position, a sign's text, a painting, the metadata), Redstone
+  hide, solo, fly to it), Blocks (the same rows for kinds and types, below), Block (click to pin: id, state, position, a sign's text, a painting, the metadata), Redstone
   (signal digits: [Redstone Tweaks](https://modrinth.com/resourcepack/redstonetweaksresourcepack), MIT, fetched from
   Modrinth once and added on top of the pack, showing dust strength, repeater delays and comparator modes; `?sim=on`:
   the renderer's simulator), File (open, copy link, the pack). Hover shows a tooltip. The link follows the view: the
-  file, the shell, the hidden parts, the layer and the camera; it can name only a file opened by its address, so Copy
+  file, the shell, the hidden parts, kinds and types, the layer and the camera; it can name only a file opened by its address, so Copy
   link is dimmed for a file from disk. Build downloads an animated GIF of the build going up a layer at a time. A
   resource pack dropped on the page, like Redstone Tweaks, goes above the built pack and wins over it. `?` lists the
   mouse and keyboard controls.
+- **Kinds and types.** The Blocks group picks blocks out the way Parts does, and the three add up: a block shows
+  when its part, its kinds and its type all do (`src/kinds.js`). A type is a block's id without its state (every oak
+  stairs). A kind is a family: Redstone, Lighting, Storage, Stations, Trees, Plants, Water, Terrain, Glass, Fences &
+  walls, Openings, Signs, Rails, and the shell's Roof, Walls and Floor (the View group's toggles, the same state). A
+  block can be of several kinds (a hopper is storage and redstone) or of none. Most kinds go by the id. Redstone also
+  takes the plain blocks its components stand on, point into, watch, read (a chest read by a comparator, through a
+  block too), push or feed, and the doors and lamps beside them, one step out with no signal followed; Inspect says
+  why. Trees take the logs that touch their leaves. A metadata record's `kind` adds kinds outright. The kinds are left
+  out of a file they cannot split (under 64 blocks, or nearly all one kind), the whole group out of a file of one
+  type. The types list shows the 40 largest until "show all"; <kbd>/</kbd> filters both lists. Hiding Terrain on a
+  million-block landscape draws in milliseconds once its cut faces are built (the first time, about half a second).
 - **Materials.** What the blocks in view take (`src/materials/`): the layers drawn, less the hidden shell and parts,
   unless the list is pinned. The panel's group shows the biggest items; List (<kbd>M</kbd>) opens the sheet. A block
   counts as the item it is placed from (a wall sign is a sign, dust is redstone, a door or bed is one item, a double
@@ -122,6 +133,8 @@ done. `package.json` is untouched: `npm run dev`, `npm run build` and the deploy
 | `?schem=<name, path or URL>` | a plan file under the plans base (a name without its extension: its .schem, else .litematic, else .nbt) (`VITE_PLANS_BASE`: the files bucket on the site, `/plans/` in development) or a URL on an allowed origin (the page's own, `https://files.craftlabs.nexus`, `https://gg.craftlabs.nexus`, `VITE_ALLOWED_ORIGINS`) |
 | `?hide=roof,wall,floor`, `?roof=on`, `?roof=off` | the shell parts hidden at first (the roof starts hidden when it covers most of the footprint) |
 | `?part=a,b`, `?hidePart=a,b` | only those parts, or those parts hidden (names as the Parts list spells them) |
+| `?kind=a,b`, `?hideKind=a,b` | only the blocks of those kinds, or those kinds hidden (`redstone`, `lighting`, `storage`, `stations`, `trees`, `plants`, `water`, `terrain`, `glass`, `fences`, `openings`, `signs`, `rails`, `roof`, `wall`, `floor`) |
+| `?type=a,b`, `?hideType=a,b` | only those types, or those hidden (block ids; `stone` is `minecraft:stone`) |
 | `?layer=below,N`, `?minY=M&maxY=N` | a layer mode at file layer N, or a layer range (N exclusive, negative from the top) |
 | `?cam=px,py,pz,tx,ty,tz` | the camera and its pivot, world coordinates |
 | `?at=x,y,z` | the block pinned in the Block panel, world coordinates (the address bar follows the pin; Copy in the Block panel, or <kbd>C</kbd>, copies it with this link) |
@@ -145,7 +158,7 @@ file's `Metadata` (the format's place for an application's data), or at the root
 | `Version` | int | 1 |
 | `Origin` | int array | the world position of the file's cell 0, 0, 0 (x, y, z); a `.litematic` or `.nbt` takes it as its offset, so a cell has one position in every format |
 | `Size` | int array | the box `Cells` counts in: width, height, length |
-| `Records` | list of compounds | the distinct entries, each a compound of strings and lists of strings: `owner`, `role`, `item`, `part`, `shell` (roof, wall, floor), `ids`, ... |
+| `Records` | list of compounds | the distinct entries, each a compound of strings and lists of strings: `owner`, `role`, `item`, `part`, `shell` (roof, wall, floor), `kind` (kinds to add, as `?kind=` spells them), `ids`, ... |
 | `Cells` | int array | one int per cell of the box, in the order (y × length + z) × width + x: 0 for a cell without an entry, else 1 + its index in `Records` |
 | `Parts` | list of strings | optional: the parts in the order the Parts list shows them |
 
@@ -197,6 +210,7 @@ publishes them is not part of this repository.
 | `index.html`, `src/main.js` | the page |
 | `src/schematic.js`, `src/nbt.js` | the schematic in memory: NBT in the browser, info, shell, parts, signs, layer counts, the file the renderer gets |
 | `src/layers.js` | where a layer step lands: the nearest layer that changes what is drawn |
+| `src/kinds.js` | kinds and types: each block's kinds in one pass (the redstone and tree neighbour rules), the types, and each cell's group for the renderer |
 | `src/blockmeta.js` | the block metadata (BlockInfo, or a Litematica file's regions) kept as a record index a cell |
 | `src/formats.js` | Litematica and structure files turned into Sponge ones, and the block metadata, mod list and description a file carries |
 | `src/parts.js`, `src/framed.js`, `src/decorated.js` | the plan's parts and shell from its metadata; framed drawers' ids per material set; patterned banners' and sherd pots' ids per design |

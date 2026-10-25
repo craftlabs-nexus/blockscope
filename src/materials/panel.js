@@ -19,7 +19,8 @@ const HIGHLIGHT_MAX = 60000;
 
 /**
  * host: { $ (by id), file() ({ schem, hash, name } or null), scope() ({ lo, hi, hidden, chips }), meta(), parts(),
- * worldY(y), highlight(cells or null), soloPart(name), singleLayer(fileY), status(text, kind), download(blob, name) }.
+ * worldY(y), highlight(cells or null), soloPart(name), singleLayer(fileY), status(text, kind), download(blob, name),
+ * iconsChanged() (the recipe book arrived: icons can be drawn) }.
  */
 export function createMaterials(host) {
   const { $ } = host;
@@ -104,10 +105,10 @@ export function createMaterials(host) {
     const r = result, sum = $("matsSum"), top = $("matsTop");
     if (!r) { sum.textContent = ""; top.innerHTML = `<p class="empty">Open a schematic to see what it takes.</p>`; $("matsGrpScope").textContent = ""; return; }
     const t = r.totals, got = r.grossTotals.items - t.items, firsts = r.leaves;
-    sum.textContent = r.leaves.length ? `${fmt(t.items)} · ${t.kinds} kinds${got ? ` · ${fmt(got)} in hand` : ""}` : "nothing";
+    sum.textContent = r.leaves.length ? `${fmt(t.items)} · ${t.kinds} different${got ? ` · ${fmt(got)} in hand` : ""}` : "nothing";
     $("matsGrpScope").innerHTML = chipsHtml();
     top.innerHTML = firsts.length ? firsts.slice(0, 6).map((n) => `<div class="mmini" data-id="${esc(n.id)}" data-g="all" title="${esc(nameOf(n.id, book))}: ${fmt(n.net)} to get${n.have ? ` (${fmt(n.have)} in hand)` : ""}"><img class="ic" alt="" data-ic="${esc(n.id)}"><span class="nm">${esc(nameOf(n.id, book))}</span><span class="c">${fmt(n.net)}</span><span class="pk">${esc(packText(n.net, n.id, { units: "stacks" }))}</span></div>`).join("") +
-      (firsts.length > 6 ? `<div class="mmini more" data-more="1"><span></span><span class="nm">${firsts.length - 6} more kinds…</span><span></span><span></span></div>` : "")
+      (firsts.length > 6 ? `<div class="mmini more" data-more="1"><span></span><span class="nm">${firsts.length - 6} more items…</span><span></span><span></span></div>` : "")
       : `<p class="empty">No blocks in view.</p>`;
     fillIcons(top);
   }
@@ -153,7 +154,7 @@ export function createMaterials(host) {
     $("matsScope").innerHTML = chipsHtml();
     if (!r) { list.innerHTML = `<p class="empty">Open a schematic to see what it takes.</p>`; $("matsTotals").textContent = ""; return; }
     const t = r.totals, g = r.grossTotals, got = g.items - t.items;
-    $("matsTotals").innerHTML = `<span><b>${fmt(r.blocks)}</b> blocks</span><span><b>${fmt(t.items)}</b> ${got ? "to get" : "items"} · <b>${t.kinds}</b> kinds</span><span><b>${fmt(t.stacks)}</b> stacks</span><span title="${SHULKER} stacks a box"><b>${t.shulkers.toFixed(1)}</b> shulker boxes</span><span title="${INVENTORY} slots an inventory"><b>${t.trips.toFixed(1)}</b> inventories</span>${got ? `<span class="ok"><b>${fmt(got)}</b> of ${fmt(g.items)} in hand</span>` : ""}`;
+    $("matsTotals").innerHTML = `<span><b>${fmt(r.blocks)}</b> blocks</span><span><b>${fmt(t.items)}</b> ${got ? "to get" : "items"} · <b>${t.kinds}</b> different</span><span><b>${fmt(t.stacks)}</b> stacks</span><span title="${SHULKER} stacks a box"><b>${t.shulkers.toFixed(1)}</b> shulker boxes</span><span title="${INVENTORY} slots an inventory"><b>${t.trips.toFixed(1)}</b> inventories</span>${got ? `<span class="ok"><b>${fmt(got)}</b> of ${fmt(g.items)} in hand</span>` : ""}`;
     const q = $("matsFilter").value.trim().toLowerCase();
     let html = "";
     if (prefs.tab === "tree") html = treeHtml(q);
@@ -328,7 +329,8 @@ export function createMaterials(host) {
     $("matsCsv").onclick = () => host.download(new Blob([exportCsv()], { type: "text/csv" }), `${stem()}-materials.csv`);
     $("matsJson").onclick = () => host.download(new Blob([JSON.stringify(exportJson(), null, 2)], { type: "application/json" }), `${stem()}-materials.json`);
   }
-  const snapshot = (sc) => ({ lo: sc.lo, hi: sc.hi, hidden: new Set(sc.hidden), chips: sc.chips });
+  // the page hands over a new hidden-cells object whenever what is hidden changes, so pinning keeps it as it is
+  const snapshot = (sc) => ({ lo: sc.lo, hi: sc.hi, hidden: sc.hidden, chips: sc.chips });
   function setSheet(on) {
     prefs.sheet = on; persist();
     $("mats").hidden = !on;
@@ -347,7 +349,7 @@ export function createMaterials(host) {
     const rows = exportRows(), w = Math.max(4, ...rows.map((x) => x.packed.length));
     let g = null; const out = [title(), ""];
     for (const x of rows) { if (x.group !== g && x.group !== null) { out.push("", x.group); g = x.group; } out.push(`${x.packed.padStart(w)}  ${x.name}${x.note ? `  (${x.note})` : ""}`); }
-    const t = result?.totals; if (t) out.push("", `${fmt(t.items)} items, ${t.kinds} kinds, ${fmt(t.stacks)} stacks, ${t.shulkers.toFixed(1)} shulker boxes`);
+    const t = result?.totals; if (t) out.push("", `${fmt(t.items)} items, ${t.kinds} different items, ${fmt(t.stacks)} stacks, ${t.shulkers.toFixed(1)} shulker boxes`);
     return out.join("\n");
   }
   function exportMarkdown() {
@@ -383,7 +385,12 @@ export function createMaterials(host) {
     setBook(b, reader, state = b ? "ready" : "missing") {
       if (b !== book) resetIcons();
       book = b; readTexture = reader; bookState = state; lookup = lookupOf(b);
-      recompute();
+      recompute(); host.iconsChanged?.();
+    },
+    /** The icon of the item a block (its id) is placed from, as a data URL, or null (no pack yet, no such item). */
+    iconOfBlock(id) {
+      const item = blockItems(id, lookup)?.items?.[0]?.[0];
+      return item ? iconUrl(item, book?.items?.[item]?.[1], readTexture) : Promise.resolve(null);
     },
     toggleSheet() { setSheet(!prefs.sheet); },
     close() { if (prefs.sheet) { setSheet(false); return true; } return false; },

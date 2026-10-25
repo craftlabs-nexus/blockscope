@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { encodeNbt, gzip, encodeVarints } from "../src/nbt.js";
 import { Schematic } from "../src/schematic.js";
-import { classify, typesOf, kindsOfId, kindsShown, kindsOfMask, KINDS, KIND_BIT, REDSTONE_REASONS, KINDS_MIN_BLOCKS, KINDS_MIN_SECOND } from "../src/kinds.js";
+import { classify, typesOf, codeGroups, HiddenCells, kindsOfId, kindsShown, kindsOfMask, KINDS, KIND_BIT, REDSTONE_REASONS, KINDS_MIN_BLOCKS, KINDS_MIN_SECOND } from "../src/kinds.js";
 
 const i32 = (v) => ({ t: 3, v }), i16 = (v) => ({ t: 2, v });
 
@@ -121,4 +121,27 @@ test("types: by id, the state left out, most blocks first", async () => {
   assert.equal(ofPalette[s.data[s.index(1, 0, 0)]], 1);
   assert.equal(ofPalette[s.data[s.index(2, 0, 0)]], 2);
   assert.equal(ofPalette[0], 0, "air has no type");
+});
+
+test("cell groups: one a (part, kinds, type) combination, air 0, and the cells they hide", async () => {
+  const s = await build(4, 1, 1, { "0,0,0": "minecraft:stone", "1,0,0": "minecraft:stone", "2,0,0": "minecraft:cobblestone" });
+  const { BlockMeta } = await import("../src/blockmeta.js");
+  const meta = new BlockMeta([0, 0, 0], [4, 1, 1], new Uint32Array([1, 2, 2, 0]), [{ part: "a" }, { part: "b" }]);
+  const part = s.partIndex(meta, ["a", "b"]);
+  assert.deepEqual([...part], [1, 2, 2, 0]);
+  const k = classify(s), t = typesOf(s), c = codeGroups(s, part, k.mask, t.ofPalette);
+  assert.equal(c.typed, true);
+  assert.equal(c.groups[3], 0, "air");
+  assert.equal(new Set(c.groups.slice(0, 3)).size, 3, "stone in a, stone in b, cobblestone in b");
+  const g = c.groups[1];
+  assert.deepEqual([c.part[g], c.kinds[g], t.types[c.type[g] - 1].id], [2, KIND_BIT.terrain, "minecraft:stone"]);
+  // too many combinations for the code: the types are left out
+  const small = codeGroups(s, part, k.mask, t.ofPalette, 2);
+  assert.equal(small.typed, false);
+  assert.equal(small.groups[1], small.groups[2], "b's stone and cobblestone (both terrain) share a group without their types");
+  // hide group of b's stone; the lookup answers per cell and lists like a Set
+  const flags = new Uint8Array(c.size); flags[g] = 1;
+  const hidden = new HiddenCells(c.groups, flags);
+  assert.deepEqual([[...hidden], hidden.size, hidden.has(0), hidden.has(1)], [[1], 1, false, true]);
+  assert.deepEqual([...new HiddenCells(c.groups, new Uint8Array(c.size), (i) => i === 3)], [3]);
 });
