@@ -172,3 +172,12 @@ test("modded ids: the work blocks are stations, not every table or pot; a wire i
   assert.ok(has("farmersdelight:cooking_pot", "stations") && has("farmersdelight:cutting_board", "stations"));
   assert.ok(!has("somemod:light_oak_planks", "lighting") && has("somemod:wall_lamp", "lighting"));
 });
+
+test("trees: a nether fungus's stem under its wart blocks, a huge mushroom's stem, a bamboo block by leaves", async () => {
+  const s = await build(5, 3, 1, { "0,0,0": "minecraft:crimson_stem[axis=y]", "0,1,0": "minecraft:nether_wart_block", "2,0,0": "minecraft:mushroom_stem[down=true,east=true,north=true,south=true,up=true,west=true]", "2,1,0": "minecraft:red_mushroom_block[down=true,east=true,north=true,south=true,up=true,west=true]", "4,0,0": "minecraft:bamboo_block[axis=y]", "4,1,0": "minecraft:jungle_leaves[distance=1,persistent=true,waterlogged=false]" });
+  const k = classify(s);
+  for (const [x, y] of [[0, 0], [0, 1], [2, 0], [2, 1], [4, 0], [4, 1]]) assert.ok(kindsAt(s, k, x, y, 0).includes("trees"), `${x},${y}`);
+  // a melon's stem is a plant, never a tree's log
+  const m = await build(2, 1, 1, { "0,0,0": "minecraft:melon_stem[age=7]", "1,0,0": "minecraft:oak_leaves[distance=1,persistent=true,waterlogged=false]" });
+  assert.deepEqual(kindsAt(m, classify(m), 0, 0, 0), ["plants"]);
+});

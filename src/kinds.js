@@ -13,9 +13,10 @@ const either = (...tests) => (id) => tests.some((t) => (typeof t === "function" 
 
 const REDSTONE_CORE = /^minecraft:(redstone_wire|repeater|comparator|observer|redstone_(wall_)?torch|redstone_block|lever|.*_button|.*_pressure_plate|tripwire(_hook)?|daylight_detector|target|note_block|(sticky_)?piston|piston_head|moving_piston|dispenser|dropper|hopper|powered_rail|detector_rail|activator_rail|redstone_lamp|tnt|trapped_chest|iron_door|iron_trapdoor|(calibrated_)?sculk_sensor|sculk_shrieker|.*copper_bulb|crafter|lightning_rod)$/;
 const STORAGE = /^minecraft:(chest|trapped_chest|ender_chest|.*copper_chest|barrel|.*shulker_box|hopper|dropper|dispenser|(blast_)?furnace|smoker|brewing_stand|chiseled_bookshelf|decorated_pot)$/;
-const LEAVES = either(/_leaves$|_sapling$|_blossoms$/, /^minecraft:(mangrove_roots|muddy_mangrove_roots|mangrove_propagule|(flowering_)?azalea)$/);
+// a tree's crown: leaves, and a nether fungus's wart blocks and a huge mushroom's caps
+const LEAVES = either(/_leaves$|_sapling$|_blossoms$/, /^minecraft:(mangrove_roots|muddy_mangrove_roots|mangrove_propagule|(flowering_)?azalea|nether_wart_block|warped_wart_block|(brown|red)_mushroom_block)$/);
 // the wood a tree is made of: a tree's when it touches its leaves or another such log
-const LOG = /_log$|_wood$|^minecraft:stripped_|^minecraft:bamboo$/;
+const LOG = /_log$|_wood$|_hyphae$|^minecraft:stripped_|^minecraft:(crimson_stem|warped_stem|mushroom_stem|bamboo|bamboo_block)$|^(?!minecraft:).*_stem$/;
 // shaped blocks are building, never terrain
 const SHAPED = /stairs|slab|_wall$|bricks?|tiles?|fence|button|pressure_plate|polished|smooth|chiseled|cut_/;
 
