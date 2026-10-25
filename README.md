@@ -40,11 +40,13 @@ one for the Roof toggle and one for Inspect.
   shell and what each block is for come from the generator's metadata: the file's own when it carries some (below),
   else a `<name>.meta.json` (opened or dropped with a file from disk; a plan file opened by its address finds it
   beside itself), else a Litematica file's regions as its parts. The Parts group's tooltip says which.
+- **Changes draw at once.** The renderer holds the whole file, each cell labeled with its part and shell role, and
+  draws the layers, parts and shell asked for without loading the file again (a few milliseconds; a new
+  combination's hidden faces, the ones the hidden cells covered, a little longer): only opening another file reloads.
 - **The view.** View (fit to the fronts, perspective, isometric or top: a flat plan straight down, every block the
   same size, drag pans, Q / E turn it a quarter, a block grid; Shot, Build, the shell toggles), Layers (all,
   single, below, above, a slider; PageUp / PageDown or [ ] step to the next layer that changes the view, passing
-  over layers with nothing shown, and a layer change draws at once: the renderer holds every layer and draws the
-  range, so only a change of parts or shell loads the file again), Parts (from the metadata or a Litematica file's regions: hover to light one up,
+  over layers with nothing shown), Parts (from the metadata or a Litematica file's regions: hover to light one up,
   hide, solo, fly to it), Block (click to pin: id, state, position, a sign's text, a painting, the metadata), Redstone
   (signal digits: [Redstone Tweaks](https://modrinth.com/resourcepack/redstonetweaksresourcepack), MIT, fetched from
   Modrinth once and added on top of the pack, showing dust strength, repeater delays and comparator modes; `?sim=on`:

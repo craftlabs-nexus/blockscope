@@ -57,7 +57,7 @@ blockscope.state();                           // file, status, size, origin, hid
 | `state()` | `file`, `status` and `error` (the status line, red or not), `size` (blocks: x, y, z), `origin` (the world position of the file's corner cell; a cell's world position is origin + file position), `parts`, `hiddenParts`, `layers` (`mode`, `fileY`: the file layers drawn), `pinned`, `camera` (the renderer's scene coordinates, not world), `pack`, `unknownBlocks` (blocks drawn without a model), `url` |
 | `parts()` | the parts in the Parts list's order (from the file's metadata, a `.meta.json` beside it, or a Litematica file's regions) |
 | `findBlocks(query, { limit = 200 })` | blocks whose `id[state]` contains `query` (or matches it, a `RegExp`), first `limit` in file order, and how many in all |
-| `focusPart(name, { solo, highlight })` | shows the part if it was hidden (`solo`: and hides the others, reloading the file), flies to it and selects its row; an unknown name throws with the list of parts |
+| `focusPart(name, { solo, highlight })` | shows the part if it was hidden (`solo`: and hides the others), flies to it and selects its row; an unknown name throws with the list of parts |
 | `focusBlock(x, y, z, { radius = 3, pin = true })` | flies to the block with `radius` blocks around it in view and pins it as a click would; returns `{ id, state, part, extra (a sign's text, a painting), world, … }`; outside the file it throws |
 | `describe(x, y, z)` | what Inspect shows for a block, by **file** position |
 | `screenshot(w, h)` | a PNG data URL of the canvas alone at that size |
@@ -97,5 +97,6 @@ For example, one part alone, framed: `?agent=1&schem=<file>&part=<part>&focus=<p
   `node_modules/.vite*/deps/…` means Vite's dependency cache moved under the server: restart `npm run dev:local` (or
   `npm run dev`).
 - **`ready()` times out**: a first download on a slow line (raise the timeout), or the pack failed (the status line).
-- **The camera is not where you put it**: something reloaded the file after you moved it (a parts or shell change; a
-  layers change draws without a reload); wait for `nextRender()` (or use `focusPart`, which waits itself), then move it.
+- **The camera is not where you put it**: a view not moved yet is framed again after a change of layers, parts or
+  shell (as after a load), and opening a file frames the new one; wait for `nextRender()` (or use `focusPart`, which
+  waits itself), then move it.

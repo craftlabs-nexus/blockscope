@@ -37,6 +37,9 @@ async function toSponge(bytes) {
   try { return w.to_schematic(); } finally { w.free?.(); }
 }
 
+/** The shell roles in the order of their cell group numbers (cellGroups): roof 1, wall 2, floor 3. */
+export const SHELL_ROLES = ["roof", "wall", "floor"];
+
 export class Schematic {
   /** Reads a schematic from its bytes, whatever its name says: its contents decide the format. */
   static async load(bytes, name) {
@@ -139,11 +142,24 @@ export class Schematic {
     return { parts, counts, roofCover: Math.round((counts.roof / (this.perLayer || 1)) * 100) / 100 };
   }
 
-  /** The block indices of every cell whose metadata puts it in one of the named parts. */
-  partIndices(meta, names) {
-    const out = new Set();
-    if (!meta || !names.size) return out;
-    for (let i = 0; i < this.data.length; i++) { const [x, y, z] = this.cellOf(i); const p = partOf(this.metaAt(meta, x, y, z)); if (p && names.has(p)) out.add(i); }
+  /**
+   * Each cell's group as the renderer takes it (one a cell, in the file's order), for hiding parts and the shell
+   * without loading the file again: 4 × (the part's place in `partNames` + 1, 0 for no part) + its shell role
+   * (`shellCells`: 1 roof, 2 wall, 3 floor, 0 none).
+   */
+  cellGroups(meta, partNames, shellCells) {
+    const out = new Uint16Array(this.data.length);
+    const place = new Map(partNames.map((n, i) => [n, i + 1]));
+    if (meta) {
+      const [ox, oy, oz] = this.offset;
+      for (const [k, m] of Object.entries(meta)) {
+        const at = place.get(partOf(m)); if (!at) continue;
+        const [x, y, z] = k.split(",").map(Number), lx = x - ox, ly = y - oy, lz = z - oz;
+        if (lx < 0 || ly < 0 || lz < 0 || lx >= this.width || ly >= this.height || lz >= this.length) continue;
+        out[this.index(lx, ly, lz)] = at * 4;
+      }
+    }
+    for (const [i, role] of shellCells) out[i] += SHELL_ROLES.indexOf(role) + 1;
     return out;
   }
 

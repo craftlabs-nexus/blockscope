@@ -5,7 +5,7 @@ import { SchematicRenderer } from "@craftlabs/schematic-renderer";
 import * as THREE from "three";
 import JSZip from "jszip";
 import { analyzeFolder, analyzePackZip, detectPackZip, fromFileList } from "@craftlabs/packrat";
-import { Schematic } from "./schematic.js";
+import { Schematic, SHELL_ROLES } from "./schematic.js";
 import { partOf, partsOf, shellPart } from "./parts.js";
 import { framedRealId } from "./framed.js";
 import { decoratedRealId, DYES } from "./decorated.js";
@@ -68,11 +68,25 @@ let hiddenCache = { key: null, set: null };
 function hiddenCells() {
   const key = `${hiddenParts().join(",")}|${[...hiddenPartSet].sort().join(",")}`;
   if (hiddenCache.key === key) return hiddenCache.set;
-  const gone = new Set();
-  for (const [i, p] of shellCells) if (!shell[p]) gone.add(i);
-  for (const i of file.schem.partIndices(meta, hiddenPartSet)) gone.add(i);
+  // the cells of the hidden groups (each cell's part and shell role: cellGroupsNow), listed once per file
+  const gone = new Set(), lists = groupCellsNow();
+  for (const g of hiddenGroupsNow()) { const cells = lists.get(g); if (cells) for (const i of cells) gone.add(i); }
   hiddenCache = { key, set: gone };
   return gone;
+}
+// the cells of each cell group, worked out once per file (a counting sort of cellGroupsNow)
+let groupCellsCache = { file: null, lists: null };
+function groupCellsNow() {
+  if (groupCellsCache.file === file) return groupCellsCache.lists;
+  const groups = cellGroupsNow(), counts = new Uint32Array(65537);
+  for (const g of groups) counts[g + 1]++;
+  for (let g = 1; g <= 65536; g++) counts[g] += counts[g - 1];   // counts[g]: where group g's cells start
+  const all = new Int32Array(groups.length), fill = counts.slice(0, 65536);
+  for (let i = 0; i < groups.length; i++) all[fill[groups[i]]++] = i;
+  const lists = new Map();
+  for (let g = 0; g < 65536; g++) if (counts[g + 1] > counts[g]) lists.set(g, all.subarray(counts[g], counts[g + 1]));
+  groupCellsCache = { file, lists };
+  return lists;
 }
 // what the page knows about a cell (file coordinates "x,y,z"): the sign there, the painting hanging on that wall block
 const signAt = new Map(), paintingAt = new Map();
@@ -167,20 +181,39 @@ const capture = { on: false, stop: false, rendered: null, after: null };
 const topView = { on: false, q: 0, heading: 0, anim: null, prev: "perspective", saved: null, grid: true, wanted: null };
 try { topView.grid = localStorage.getItem("top.grid") !== "0"; } catch {}
 const simOn = params.get("sim") === "on";
-// What the renderer's file was built from: the file and the hidden cells (shell and parts as air). It holds every
-// layer, and the renderer draws the ones asked for (setLayerRange: no reload, a few tens of ms), so a change of
-// layers alone keeps the file; any other change loads it again. `live` is false where the renderer cannot (one
-// without setLayerRange, or a build without layer runs): the file then carries only the layers drawn, as before.
-const loaded = { file: null, hidden: null, live: true };
+// The renderer holds the whole file, every cell labeled with its part and shell role (a cell group: cellGroupsNow),
+// and draws the layers and groups asked for (showCells: no reload, a few ms to a few tens), so a change of layers,
+// parts or shell keeps the file; only another file loads. `live` is false where the renderer cannot (one without
+// showCells, or a build without layer runs): the file it gets then carries only what is drawn, the rest as air.
+const loaded = { file: null, hidden: null, live: true, cut: false };   // cut: the file the renderer has leaves out what is hidden
 const schematicObject = () => renderer?.schematicManager?.getSchematic?.(SCHEM_ID) ?? renderer?.schematicManager?.getFirstSchematic?.();
 /** The layers drawn as the renderer takes them (minY..maxY-1), null for all. */
 const rangeNow = () => (layer.mode === "all" ? null : { minY: layer.lo, maxY: layer.hi + 1 });
-/** The file as the renderer gets it now: the hidden shell and parts as air, and the layer range unless it draws that itself. */
-function renderBytes() {
-  loaded.file = file; loaded.hidden = hiddenCells();
-  const range = rangeNow() && !loaded.live ? rangeNow() : {};
-  return file.schem.render({ hidden: loaded.hidden, ...range }).then((u8) => u8.buffer);
+// each cell's group: 4 × (its part's place in the Parts list + 1, 0 for none) + its shell role (1 roof, 2 wall, 3 floor)
+let groupsCache = { file: null, groups: null };
+function cellGroupsNow() {
+  if (groupsCache.file !== file) groupsCache = { file, groups: file.schem.cellGroups(meta, info.parts.map((p) => p.name), shellCells) };
+  return groupsCache.groups;
 }
+/** The cell groups of the hidden parts and shell roles. */
+function hiddenGroupsNow() {
+  const out = [];
+  for (let part = 0; part <= info.parts.length; part++) {
+    const partHidden = part > 0 && hiddenPartSet.has(info.parts[part - 1].name);
+    for (let role = 0; role < 4; role++) if (partHidden || (role > 0 && !shell[SHELL_ROLES[role - 1]])) out.push(part * 4 + role);
+  }
+  return out;
+}
+/** Whether the renderer can show what is asked for from the file it holds. */
+const canShowNow = (so) => loaded.live && !!so?.showCells && loaded.file === file;
+/** The file as the renderer gets it now: all of it, or (not live) the hidden shell and parts as air and the layer range. */
+function renderBytes() {
+  loaded.file = file; loaded.hidden = hiddenCells(); loaded.cut = !loaded.live;
+  const cut = loaded.live ? {} : { hidden: loaded.hidden, ...(rangeNow() ?? {}) };
+  return file.schem.render(cut).then((u8) => u8.buffer);
+}
+/** What the renderer takes with a file: the cell groups and what to show, when it can. */
+const loadProps = () => (loaded.live ? { layerRange: rangeNow(), cellGroups: cellGroupsNow(), hiddenGroups: hiddenGroupsNow() } : {});
 // the layers that hold a block once the hidden shell and parts are air (the layer steps skip the rest)
 let filledCache = { file: null, hidden: null, ys: [] };
 function filledNow() {
@@ -502,16 +535,18 @@ async function startRenderer() {
         onResourcePackLoaded: () => status("pack loaded, meshing…", "busy"),
         onSchematicLoaded: () => {
           status(`${schemName} parsed, building meshes…`, "busy");
-          // the first file holds every layer: the renderer draws the layers a link asks for from its first build
+          // the first file is whole: the renderer gets its cell groups, and draws what a link asks for from its first build
           const so = schematicObject();
-          if (!so?.setLayerRange) loaded.live = false;
-          else if (rangeNow()) so.setLayerRange(rangeNow());
+          if (!so?.showCells || !so?.setCellGroups) loaded.live = false;
+          else { so.setCellGroups(cellGroupsNow()); so.showCells(rangeNow(), hiddenGroupsNow()); }
         },
         onSchematicRendered: () => {
-          // a build that cannot draw a range of layers (or a renderer without it) while one is asked for: the file
-          // is loaded again with only those layers
+          // a build that cannot show some cells (or a renderer without it), or a whole file from before that was
+          // found out, while something is hidden: the file is loaded again with only what is drawn
           const so = schematicObject();
-          if (loaded.live && rangeNow() && !(so?.canShowLayerRange?.() ?? false)) { loaded.live = false; reloadLayers("the layers"); return; }
+          const cutWanted = !!rangeNow() || hiddenGroupsNow().length > 0;
+          if (loaded.live && !(so?.canShowLayerRange?.() ?? false)) loaded.live = false;
+          if (!loaded.live && !loaded.cut && cutWanted) { reloadLayers("what is drawn"); return; }
           status(capture.after ?? `rendered ${schemName}${source.none && wantedNamespaces(file.schem).length ? ": it lists no mods, so its modded blocks need your own pack (File, Resource pack)" : ""}`); capture.after = null; pinGroup(); renderUnknown(); buildOverlayPaintings(); tuneControls(); keepBackground();
           settleSoon();
           attachMarks(); placeBox("pin", pinned.cell);
@@ -567,16 +602,23 @@ const FACE_DIR = { north: [0, -1], south: [0, 1], east: [1, 0], west: [-1, 0] };
 const OPPOSITE = { north: "south", south: "north", east: "west", west: "east" };
 let frontCache = { name: null, dir: null };
 function frontDirection() {
-  const cacheKey = `${schemName}|${[...hiddenPartSet].sort().join(",")}`;
+  const [lo, hi] = shownRange();
+  const cacheKey = `${schemName}|${[...hiddenPartSet].sort().join(",")}|${hiddenParts().join(",")}|${lo}-${hi}`;
   if (frontCache.name === cacheKey) return frontCache.dir;
   let dir = null;
   try {
     const w = renderer.schematicManager.getFirstSchematic().getSchematicWrapper();
-    // the blocks' tight box: it need not start at 0 (a solo part or a layer range leaves the rest as air)
-    const [x0, y0, z0] = Array.from(w.get_tight_bounds_min()), [x1, y1, z1] = Array.from(w.get_tight_bounds_max());
-    if ((x1 - x0 + 1) * (y1 - y0 + 1) * (z1 - z0 + 1) <= 400000) {   // a cell at a time through the wasm wrapper: rooms yes, huge files no
+    // the box of the blocks drawn (the layers drawn, the hidden shell and parts left out), from the page's own copy
+    const s = file.schem, hidden = hiddenCells(), min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+    for (let i = lo * s.perLayer; i < (hi + 1) * s.perLayer && i < s.data.length; i++) {
+      if (s.air.has(s.data[i]) || hidden.has(i)) continue;
+      const c = s.cellOf(i); for (let a = 0; a < 3; a++) { if (c[a] < min[a]) min[a] = c[a]; if (c[a] > max[a]) max[a] = c[a]; }
+    }
+    const [x0, y0, z0] = min, [x1, y1, z1] = max;
+    if (x0 <= x1 && (x1 - x0 + 1) * (y1 - y0 + 1) * (z1 - z0 + 1) <= 400000) {   // a cell at a time through the wasm wrapper: rooms yes, huge files no
       const net = { north: 0, south: 0, east: 0, west: 0 };
       for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) {
+        if (hidden.has(s.index(x, y, z))) continue;   // the renderer holds the hidden cells too
         const b = w.get_block_with_properties(x, y, z); if (!b) continue;
         const name = b.name(), weight = FRONT_WEIGHTS.find(([re]) => re.test(name))?.[1];
         const f = weight && b.properties().facing;
@@ -630,13 +672,10 @@ const inMarks = (o) => { for (let p = o; p; p = p.parent) if (p === markGroup) r
 const schematicMeshes = () => { const g = group(); const out = []; g?.traverseVisible((o) => { if (o.isMesh && !inMarks(o)) out.push(o); }); return out; };
 // the box of what is drawn (world): the meshes' boxes, cut to the layers drawn when the renderer holds them all
 function drawnBox() {
+  // the renderer holds the whole file: its box of the cells shown (the meshes' boxes hold the hidden ones too)
+  const so = schematicObject();
+  if (canShowNow(so) && so.getTightWorldBox) return so.getTightWorldBox();
   const box = new THREE.Box3(); for (const m of schematicMeshes()) box.expandByObject(m);
-  const g = group(), r = rangeNow();
-  if (!box.isEmpty() && g && r && loaded.live) {
-    box.min.y = Math.max(box.min.y, g.localToWorld(new THREE.Vector3(0, r.minY - 0.5, 0)).y);
-    box.max.y = Math.min(box.max.y, g.localToWorld(new THREE.Vector3(0, r.maxY - 0.5, 0)).y);
-    if (box.min.y > box.max.y) box.makeEmpty();
-  }
   return box;
 }
 function hitUnderPointer(ndcX, ndcY) {
@@ -995,20 +1034,21 @@ async function reloadLayers(what) {
   applyLayers();
   hideGhost(); showMatCells(null);
   const so = schematicObject();
-  if (loaded.live && so?.setLayerRange && loaded.file === file && loaded.hidden === hiddenCells()) {
-    if (await so.setLayerRange(rangeNow())) { layersShown(); return; }
-    loaded.live = false;   // this build cannot draw a range: the file is loaded with only those layers
+  if (canShowNow(so)) {
+    if (await so.showCells(rangeNow(), hiddenGroupsNow())) { layersShown(); return; }
+    loaded.live = false;   // this build cannot: the file is loaded with only what is drawn
   }
   unknown.clear();
   saveView();
   status(`reloading ${what}…`, "busy");
-  try { await renderer.schematicManager.loadSchematic(SCHEM_ID, await renderBytes(), { layerRange: loaded.live ? rangeNow() : null }); } catch (e) { status(e.message, "err"); }
+  try { await renderer.schematicManager.loadSchematic(SCHEM_ID, await renderBytes(), loadProps()); } catch (e) { status(e.message, "err"); }
   restoreSoon();
 }
-/** After the renderer shows other layers of the file it has: what the page draws over them follows. */
+/** After the renderer shows other cells of the file it has: what the page draws over them follows. */
 function layersShown() {
   status(capture.after ?? `rendered ${schemName}`); capture.after = null;
   buildOverlayPaintings(); updateGrid();
+  if (!userMoved && !capture.on) smartFit();   // a view not moved yet frames what is drawn, as after a load
   if (topView.on) placeTop();
   if (layer.mode === "above" && layer.wantBottomUp) { layer.wantBottomUp = false; lookFromBelow(); }
   syncUrl(); redraw(); settleSoon();
@@ -1298,14 +1338,14 @@ async function loadBelow(y) {
   layer.mode = "below"; layer.cur = y; applyLayers();
   // the renderer draws the layers of the file it has: no reload, only the paintings to place again
   const so = schematicObject();
-  if (loaded.live && so?.setLayerRange && loaded.file === file && loaded.hidden === hiddenCells() && (await so.setLayerRange(rangeNow()))) {
+  if (canShowNow(so) && (await so.showCells(rangeNow(), hiddenGroupsNow()))) {
     buildOverlayPaintings();
     await sleep(Math.min(window.buildGif.settle, 120));
     return;
   }
   unknown.clear();
   const rendered = new Promise((r) => { capture.rendered = r; });
-  await renderer.schematicManager.loadSchematic(SCHEM_ID, await renderBytes());
+  await renderer.schematicManager.loadSchematic(SCHEM_ID, await renderBytes(), loadProps());
   await Promise.race([rendered, sleep(60000)]);
   capture.rendered = null;
   await sleep(window.buildGif.settle);
