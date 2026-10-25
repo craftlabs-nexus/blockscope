@@ -61,9 +61,11 @@ test("schematic: render slices layers, hides cells, renames framed drawers", asy
   assert.deepEqual(s.layerCounts(roof), [6, 2, 0, 0]);
 });
 
-test("parts", () => {
-  const meta = { "0,0,0": { owner: "planks" }, "1,0,0": { owner: "planks:feed" }, "2,0,0": { owner: "room", role: "wall north" }, "3,0,0": { part: "drawer wall" } };
-  assert.equal(partOf(meta["1,0,0"]), "planks");
+test("parts", async () => {
+  const { BlockMeta } = await import("../src/blockmeta.js");
+  const records = [{ owner: "planks" }, { owner: "planks:feed" }, { owner: "room", role: "wall north" }, { part: "drawer wall" }];
+  const meta = new BlockMeta([0, 0, 0], [4, 1, 1], new Uint32Array([1, 2, 3, 4]), records);
+  assert.equal(partOf(records[1]), "planks");
   assert.deepEqual(partsOf(meta).map((p) => p.name), ["planks", "drawer wall", "room shell"]);
 });
 

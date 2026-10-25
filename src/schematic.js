@@ -121,7 +121,7 @@ export class Schematic {
     return { width: this.width, height: this.height, length: this.length, offset: this.offset, topFill: r2(topFill), belowFill: r2(belowFill), roof: this.height >= ROOF_MIN_HEIGHT && topFill >= ROOF_FILL && belowFill <= ROOF_BELOW };
   }
 
-  /** The metadata entry of a cell (file coordinates), keyed by world position in the meta file. */
+  /** The metadata entry of a cell (file coordinates): the metadata is by world position (file position + offset). */
   metaAt(meta, x, y, z) { const [ox, oy, oz] = this.offset; return meta?.at(x + ox, y + oy, z + oz) ?? null; }
   /** The metadata record of cell `i` (a BlockMeta over this file's box is read by index, without a position). */
   metaAtIndex(meta, i) {
