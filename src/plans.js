@@ -1,6 +1,5 @@
-// Plan files: a schematic on the site (or on an allowed origin) with what its generator wrote beside it, the block
-// metadata (<name>.meta.json: owner, role, item, part, shell per world position; read only for a file that carries
-// none of its own) and the paintings (<name>.paintings.json). `?schem=` names one: a path under the plans base
+// Plan files: a schematic on the site (or on an allowed origin), its block metadata in the file itself (BlockInfo),
+// and the paintings its generator wrote beside it (<name>.paintings.json). `?schem=` names one: a path under the plans base
 // (VITE_PLANS_BASE: in development /plans/, which the dev server maps to the BLOCKSCOPE_PLANS folder; on the site the
 // files bucket, https://files.craftlabs.nexus/, from .env.production) or a full URL on one of the allowed origins.
 
@@ -37,8 +36,7 @@ export async function optionalJson(url) {
   try { const r = await fetch(url); if (!r.ok) return null; return await r.json(); } catch { return null; }
 }
 
-/** The schematic's bytes and paintings, and where its metadata file would be: { name, url, bytes, meta (null),
- *  metaUrl, paintings, paintingsBase }. */
+/** The schematic's bytes and paintings: { name, url, bytes, paintings, paintingsBase }. */
 export async function loadPlan(url) {
   // a name without its extension: the first of its formats that is there (not a page some hosts answer with)
   let r = null;
@@ -54,7 +52,7 @@ export async function loadPlan(url) {
   }
   const bytes = new Uint8Array(await r.arrayBuffer());
   const stem = url.href.replace(/\.[^./?#]+(?=([?#].*)?$)/, "");
-  const metaUrl = new URL(`${stem}.meta.json`), paintingsUrl = new URL(`${stem}.paintings.json`);
+  const paintingsUrl = new URL(`${stem}.paintings.json`);
   const paintings = await optionalJson(paintingsUrl);
-  return { name: decodeURIComponent(url.pathname.split("/").pop()), url, bytes, meta: null, metaUrl, paintings: paintings?.paintings ?? [], paintingsBase: paintingsUrl.href };
+  return { name: decodeURIComponent(url.pathname.split("/").pop()), url, bytes, paintings: paintings?.paintings ?? [], paintingsBase: paintingsUrl.href };
 }

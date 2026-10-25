@@ -55,7 +55,7 @@ blockscope.state();                           // file, status, size, origin, hid
 | `ready(timeout = 300000)` | resolves with `state()` once the first file is drawn and the view has settled (at once if it has); rejects when the file cannot be read or after `timeout` ms, with the status line in the message |
 | `nextRender(timeout = 120000)` | resolves after the next render settles (after you change layers or parts yourself) |
 | `state()` | `file`, `status` and `error` (the status line, red or not), `size` (blocks: x, y, z), `origin` (the world position of the file's corner cell; a cell's world position is origin + file position), `parts`, `hiddenParts`, `layers` (`mode`, `fileY`: the file layers drawn), `pinned`, `camera` (the renderer's scene coordinates, not world), `pack`, `unknownBlocks` (blocks drawn without a model), `url` |
-| `parts()` | the parts in the Parts list's order (from the file's metadata, a `.meta.json` beside it, or a Litematica file's regions) |
+| `parts()` | the parts in the Parts list's order (from the file's metadata, or a Litematica file's regions) |
 | `findBlocks(query, { limit = 200 })` | blocks whose `id[state]` contains `query` (or matches it, a `RegExp`), first `limit` in file order, and how many in all |
 | `focusPart(name, { solo, highlight })` | shows the part if it was hidden (`solo`: and hides the others), flies to it and selects its row; an unknown name throws with the list of parts |
 | `focusBlock(x, y, z, { radius = 3, pin = true })` | flies to the block with `radius` blocks around it in view and pins it as a click would; returns `{ id, state, part, extra (a sign's text, a painting), world, … }`; outside the file it throws |

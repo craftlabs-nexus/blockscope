@@ -37,9 +37,8 @@ one for the Roof toggle and one for Inspect.
   name: a Sponge `.schem` as it is; a `.litematic` and a structure `.nbt` are turned into one in the page
   (`src/formats.js`; a Litematica file's regions are merged at their positions, a structure void or air never erasing
   another region's block); anything else, an MCEdit `.schematic`, by the renderer's WASM (Nucleation). The parts, the
-  shell and what each block is for come from the generator's metadata: the file's own when it carries some (below),
-  else a `<name>.meta.json` (opened or dropped with a file from disk; a plan file opened by its address finds it
-  beside itself), else a Litematica file's regions as its parts. The Parts group's tooltip says which.
+  shell and what each block is for come from the generator's metadata in the file (BlockInfo, below), else a
+  Litematica file's regions as its parts. The Parts group's tooltip says which.
 - **Changes draw at once.** The renderer holds the whole file, each cell labeled with its part and shell role, and
   draws the layers, parts and shell asked for without loading the file again (a few milliseconds; a new
   combination's hidden faces, the ones the hidden cells covered, a little longer): only opening another file reloads.
@@ -91,7 +90,7 @@ npm run build      # the static site in dist/
 ```
 
 Node 20 or later. The dev server can also serve a folder of plan files read-only at `/plans/` (schematics,
-`.meta.json`, `.paintings.json`, painting images): set `BLOCKSCOPE_PLANS` to it, in the environment or a `.env.local`
+`.paintings.json`, painting images): set `BLOCKSCOPE_PLANS` to it, in the environment or a `.env.local`
 (git ignores it), and `?schem=<name>` opens a file from it; a bare name is also looked for in its `fixtures/` and
 `framing-options/` subfolders. `VITE_DEFAULT_PLAN` there names the file opened without `?schem=`. Without a folder,
 open or drop a file.
@@ -198,7 +197,7 @@ publishes them is not part of this repository.
 | `index.html`, `src/main.js` | the page |
 | `src/schematic.js`, `src/nbt.js` | the schematic in memory: NBT in the browser, info, shell, parts, signs, layer counts, the file the renderer gets |
 | `src/layers.js` | where a layer step lands: the nearest layer that changes what is drawn |
-| `src/blockmeta.js` | the block metadata (BlockInfo, a .meta.json, a Litematica file's regions) kept as a record index a cell |
+| `src/blockmeta.js` | the block metadata (BlockInfo, or a Litematica file's regions) kept as a record index a cell |
 | `src/formats.js` | Litematica and structure files turned into Sponge ones, and the block metadata, mod list and description a file carries |
 | `src/parts.js`, `src/framed.js`, `src/decorated.js` | the plan's parts and shell from its metadata; framed drawers' ids per material set; patterned banners' and sherd pots' ids per design |
 | `src/plans.js` | plan files: the schematic, its metadata and paintings |

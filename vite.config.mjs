@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 // For development and for checking a build (`vite preview`): /plans/<name> serves the plan files of a local folder
-// (BLOCKSCOPE_PLANS, in the environment or .env.local; none by default), read-only: schematics, their .meta.json and .paintings.json, and the painting images. A bare name is also looked for in its fixtures/ and
+// (BLOCKSCOPE_PLANS, in the environment or .env.local; none by default), read-only: schematics, their .paintings.json, and the painting images. A bare name is also looked for in its fixtures/ and
 // framing-options/ subfolders, as the plan's own viewer did. The deployed site has no such route: there the plans
 // are static files (VITE_PLANS_BASE).
 const PLAN_FILE = /\.(schem|schematic|litematic|nbt|json|png|webp)$/i;

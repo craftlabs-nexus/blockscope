@@ -16,13 +16,12 @@ import { noModsSource, droppedSource, fileSource } from "./pack/sources.js";
 import { REDSTONE_TWEAKS, extraPackBlob } from "./pack/extras.js";
 import { tidyRendererPacks, switchPack, keepBaseLowest, packManager } from "./pack/packs.js";
 import { clear as clearStore, usage, get as storeGet, put as storePut } from "./pack/store.js";
-import { resolvePlan, loadPlan, optionalJson, DEFAULT_PLAN, SCHEMATIC_EXT } from "./plans.js";
+import { resolvePlan, loadPlan, DEFAULT_PLAN, SCHEMATIC_EXT } from "./plans.js";
 import { createMaterials } from "./materials/panel.js";
 import { esc } from "./html.js";
 import { prepareBook } from "./materials/engine.js";
 import { BOOK_FILE } from "./materials/book.js";
 import { stepTarget, filledLayers } from "./layers.js";
-import { asBlockMeta } from "./blockmeta.js";
 
 const $ = (id) => document.getElementById(id);
 // Anything that breaks the page shows in the status line, not only in the console.
@@ -41,8 +40,8 @@ const SCHEM_ID = "blockscope";   // the renderer's name for the loaded file (one
 
 // ---- the loaded file ------------------------------------------------------------------------------------------------
 // file: { name, url (a plan file's; null for one opened from disk), param (what ?schem= says), schem (Schematic),
-// meta (a .meta.json's), paintings, paintingsBase }. info: its size, offset, roof, shell counts and parts, as the
-// panel reads them. meta: the metadata in use, the file's own (BlockInfo) first, then a .meta.json, then a Litematica
+// paintings, paintingsBase }. info: its size, offset, roof, shell counts and parts, as the panel reads them. meta:
+// the metadata in use (a BlockMeta), the file's own (BlockInfo), else a Litematica
 // file's regions as parts; metaFrom says which, in words.
 let file = null, meta = null, metaFrom = "";
 let schemName = "";
@@ -97,9 +96,8 @@ function setFile(f, { fromUrl = false } = {}) {
   file = f; schemName = f.name;
   pinned.cell = null;   // the last file's pin (a link's ?at= pins in the new one once it is drawn)
   const own = f.schem.metaSource === "file" ? f.schem.meta : null;
-  // a .meta.json's object, as the file's own, kept a record a cell (blockmeta.js)
-  meta = asBlockMeta(own ?? f.meta ?? f.schem.meta ?? null, f.schem.offset, [f.schem.width, f.schem.height, f.schem.length]);
-  metaFrom = own ? "the file's own metadata" : f.meta ? `${f.name.replace(/\.[^.]+$/, "")}.meta.json` : f.schem.metaSource === "regions" ? "the Litematica file's regions" : "";
+  meta = own ?? f.schem.meta ?? null;
+  metaFrom = own ? "the file's own metadata" : f.schem.metaSource === "regions" ? "the Litematica file's regions" : "";
   $("partsGrp").querySelector("summary").title = `The file's parts, from ${metaFrom || "its metadata"}: hover to light one up, click the eye to hide it, solo to see it alone, click the name to fly to it`;
   $("schemName").textContent = schemName;
   $("schemName").title = (f.url ? f.url.href : `${schemName} (opened from disk; stays in this page)`) + (f.schem.description ? `\n${f.schem.description}` : "");
@@ -157,8 +155,6 @@ function setFile(f, { fromUrl = false } = {}) {
 async function readFile(rec) {
   status(`reading ${rec.name}…`, "busy");
   const schem = await Schematic.load(rec.bytes, rec.name);
-  // a plan file's .meta.json beside it, fetched only for a file that carries no metadata of its own
-  if (!rec.meta && rec.metaUrl && schem.metaSource !== "file") rec = { ...rec, meta: await optionalJson(rec.metaUrl) };
   // the file's hash: what the materials list keeps the person's have values under
   let hash = null;
   try { hash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", rec.bytes))].slice(0, 12).map((b) => b.toString(16).padStart(2, "0")).join(""); } catch {}
@@ -1411,14 +1407,12 @@ $("buildGif").onclick = () => captureBuild();
 // ---- opening files --------------------------------------------------------------------------------------------------
 // A schematic opened or dropped stays in the page (nothing is uploaded); the link then names no file, since a reload
 // cannot bring it back. Its generator's metadata (parts, shell, owner, role, item) is read from the file itself when
-// it carries some (BlockInfo); else from its <name>.meta.json, opened or dropped together with it. A resource-pack zip goes on top of the merged pack; a modpack (a folder,
+// it carries some (BlockInfo). A resource-pack zip goes on top of the merged pack; a modpack (a folder,
 // an .mrpack, a CurseForge or mods zip) becomes the source of the mod jars.
-async function openLocal(f, metaFile = null) {
-  let meta = null;
-  if (metaFile) { try { meta = JSON.parse(await metaFile.text()); } catch (e) { status(`${metaFile.name}: ${e.message}`, "err"); } }
-  const rec = { name: f.name, url: null, param: null, bytes: new Uint8Array(await f.arrayBuffer()), meta, paintings: [], paintingsBase: null };
+async function openLocal(f) {
+  const rec = { name: f.name, url: null, param: null, bytes: new Uint8Array(await f.arrayBuffer()), paintings: [], paintingsBase: null };
   // the dev server keeps the last file from disk in this browser's IndexedDB, so a reload opens it again (?local=)
-  if (import.meta.env.DEV) storePut("meta", DEV_LOCAL_KEY, { name: rec.name, bytes: rec.bytes, meta });
+  if (import.meta.env.DEV) storePut("meta", DEV_LOCAL_KEY, { name: rec.name, bytes: rec.bytes });
   await openFile(rec);
 }
 // On the dev server only: the last file opened from disk, kept in the browser (never sent anywhere), and the address
@@ -1428,18 +1422,12 @@ const DEV_LOCAL_KEY = "dev:local-file";
 async function reopenLocal(name) {
   const kept = await storeGet("meta", DEV_LOCAL_KEY);
   if (kept?.name !== name) return false;
-  await openFile({ name: kept.name, url: null, param: null, bytes: kept.bytes, meta: kept.meta ?? null, paintings: [], paintingsBase: null }, { fromUrl: true });
+  await openFile({ name: kept.name, url: null, param: null, bytes: kept.bytes, paintings: [], paintingsBase: null }, { fromUrl: true });
   return true;
-}
-// the metadata file among `files` that goes with the schematic `schem`: <stem>.meta.json, else the only .meta.json
-function metaFor(schem, files) {
-  const metas = files.filter((x) => /\.meta\.json$/i.test(x.name));
-  const stem = schem.name.replace(/\.[^.]+$/, "").toLowerCase();
-  return metas.find((x) => x.name.toLowerCase() === `${stem}.meta.json`) ?? (metas.length === 1 ? metas[0] : null);
 }
 $("file").onchange = (ev) => {
   const files = [...(ev.target.files ?? [])], schem = files.find((x) => SCHEMATIC_EXT.test(x.name));
-  if (schem) openLocal(schem, metaFor(schem, files)); else if (files.length) status("pick a schematic (and its .meta.json if you have it)", "err");
+  if (schem) openLocal(schem); else if (files.length) status("pick a schematic (.schem, .schematic, .litematic, .nbt)", "err");
   ev.target.value = "";
 };
 async function isResourcePack(f) {
@@ -1483,7 +1471,7 @@ addEventListener("drop", async (ev) => {
     else status(`${f.name}: neither a resource pack nor a modpack`, "err");
   }
   if (jars.length) await usePackFiles(jars.map((f) => ({ relativePath: `mods/${f.name}`, file: f })), `${jars.length} dropped jar${jars.length === 1 ? "" : "s"}`);
-  if (schem) await openLocal(schem, metaFor(schem, files));
+  if (schem) await openLocal(schem);
 });
 
 // The link: the address bar follows the view (file, shell, hidden parts, layer mode and the camera once it has been

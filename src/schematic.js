@@ -122,11 +122,7 @@ export class Schematic {
   }
 
   /** The metadata entry of a cell (file coordinates), keyed by world position in the meta file. */
-  metaAt(meta, x, y, z) {
-    const [ox, oy, oz] = this.offset;
-    if (meta instanceof BlockMeta) return meta.at(x + ox, y + oy, z + oz);
-    return meta?.[`${x + ox},${y + oy},${z + oz}`] ?? null;
-  }
+  metaAt(meta, x, y, z) { const [ox, oy, oz] = this.offset; return meta?.at(x + ox, y + oy, z + oz) ?? null; }
   /** The metadata record of cell `i` (a BlockMeta over this file's box is read by index, without a position). */
   metaAtIndex(meta, i) {
     if (meta instanceof BlockMeta && meta.alignedWith(this.offset, [this.width, this.height, this.length])) return meta.recordAt(i);
@@ -136,7 +132,7 @@ export class Schematic {
   /** Every shell cell: Map of block index -> part, how many cells each part has, and the share of the footprint the
    *  roof covers. From the metadata when it tags any shell, else the inert blocks on the outside of a roofed box. */
   shellOf(meta) {
-    if (meta && !(meta instanceof BlockMeta ? meta.records : Object.values(meta)).some((m) => shellPart(m))) meta = null;
+    if (meta && !meta.records.some((m) => shellPart(m))) meta = null;
     const roofed = this.info().roof;
     const parts = new Map(), counts = { roof: 0, wall: 0, floor: 0 };
     for (let i = 0; i < this.data.length; i++) {

@@ -1,5 +1,5 @@
-// The generator's block metadata (owner, role, item, part, shell per block: a file's BlockInfo, a <name>.meta.json, a
-// Litematica file's regions), kept as one number per cell, an index into the few distinct records, over a box of
+// The generator's block metadata (owner, role, item, part, shell per block: a file's BlockInfo, or a Litematica
+// file's regions), kept as one number per cell, an index into the few distinct records, over a box of
 // world positions. A million tagged blocks are 4 bytes each, not a million "x,y,z" string keys, and a scan over every
 // cell (the parts, the shell, the cell groups) is a typed-array loop, not a walk over a million-key object.
 
@@ -17,24 +17,6 @@ export class BlockMeta {
     for (let i = 0; i < cells.length; i++) if (cells[i]) n++;
     /** How many cells have a record. */
     this.count = n;
-  }
-
-  /**
-   * From a .meta.json's object ("x,y,z" world position -> record), over the box of `origin` and `size` (a file's
-   * offset and size); entries outside it are left out. Records that are the same object stay one record.
-   */
-  static fromObject(object, origin, size) {
-    const [W, H, L] = size, [ox, oy, oz] = origin;
-    const cells = new Uint32Array(W * H * L), records = [], index = new Map();
-    for (const key in object) {
-      const m = object[key]; if (!m) continue;
-      const [x, y, z] = key.split(",").map(Number), lx = x - ox, ly = y - oy, lz = z - oz;
-      if (!(lx >= 0 && ly >= 0 && lz >= 0 && lx < W && ly < H && lz < L)) continue;
-      let r = index.get(m);
-      if (r === undefined) { r = records.push(m); index.set(m, r); }
-      cells[(ly * L + lz) * W + lx] = r;
-    }
-    return new BlockMeta(origin, size, cells, records);
   }
 
   /** The record at a world position, or null. */
@@ -63,6 +45,3 @@ export class BlockMeta {
     }
   }
 }
-
-/** A metadata source as a BlockMeta: one already, or a .meta.json's object over a file's box. */
-export const asBlockMeta = (meta, origin, size) => (!meta || meta instanceof BlockMeta ? meta ?? null : BlockMeta.fromObject(meta, origin, size));

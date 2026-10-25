@@ -1,6 +1,6 @@
 // The parts of a schematic: the logical pieces a person wants to see on their own or hide (one autocrafting line,
-// the clock, the drawer wall, an aisle, the shell), read from the generator's block metadata (<name>.meta.json:
-// owner, role, item per world position; the hall's metadata also tags `part` outright). Shared with the storage
+// the clock, the drawer wall, an aisle, the shell), read from the generator's block metadata (a file's BlockInfo:
+// owner, role, item per block; the hall's metadata also tags `part` outright). Shared with the storage
 // plan's generators, whose own copy is `storage-plan/parts.mjs`; the two agree on partOf and the order.
 
 /** The part a block belongs to, from its metadata entry, or null for a block without one. */

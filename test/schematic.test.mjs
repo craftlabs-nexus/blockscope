@@ -190,14 +190,12 @@ test("the file's mod list: read from the file, only Modrinth's CDN with a sha512
   assert.equal(fileSource({ list: [] }), null);
 });
 
-test("block metadata kept a record a cell: by world position, by a file's cell index, and from a .meta.json", async () => {
-  const { BlockMeta, asBlockMeta } = await import("../src/blockmeta.js");
+test("block metadata kept a record a cell: by world position and by a file's cell index", async () => {
+  const { BlockMeta } = await import("../src/blockmeta.js");
   const shared = { owner: "room", role: "wall north" };
-  // a 2 × 1 × 2 box at world (5, 60, 7): three cells tagged, two with the same record
-  const meta = asBlockMeta({ "5,60,7": { part: "a" }, "6,60,7": shared, "6,60,8": shared, "9,9,9": { part: "outside" } }, [5, 60, 7], [2, 1, 2]);
-  assert.ok(meta instanceof BlockMeta);
+  // a 2 × 1 × 2 box at world (5, 60, 7): three cells tagged, two with the same record (cells: record index + 1)
+  const meta = new BlockMeta([5, 60, 7], [2, 1, 2], new Uint32Array([1, 2, 0, 2]), [{ part: "a" }, shared]);
   assert.equal(meta.count, 3);
-  assert.equal(meta.records.length, 2, "the shared record kept once, the one outside the box left out");
   assert.deepEqual(meta.at(5, 60, 7), { part: "a" });
   assert.equal(meta.at(6, 60, 8), shared);
   assert.equal(meta.at(5, 60, 8), null);
