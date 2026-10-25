@@ -259,3 +259,15 @@ test("redstone: a dropper feeds the chest it faces, a dispenser does not", async
   assert.equal(whyAt(s, k, 1, 0, 0), "fed by a hopper or dropper");
   assert.deepEqual(kindsAt(s, k, 3, 0, 0), ["storage"]);
 });
+
+test("redstone: an extended piston has pushed its line; a sticky one holds the block on its head; a torch ends a push", async () => {
+  const s = await build(5, 1, 1, { "0,0,0": "minecraft:piston[extended=true,facing=east]", "1,0,0": "minecraft:piston_head[facing=east,short=false,type=normal]", "2,0,0": "minecraft:stone", "3,0,0": "minecraft:stone" });
+  const k = classify(s);
+  assert.equal(k.reason[s.index(2, 0, 0)], 0);
+  const t = await build(4, 1, 1, { "0,0,0": "minecraft:sticky_piston[extended=true,facing=east]", "1,0,0": "minecraft:piston_head[facing=east,short=false,type=sticky]", "2,0,0": "minecraft:stone", "3,0,0": "minecraft:stone" });
+  const kt = classify(t);
+  assert.deepEqual([whyAt(t, kt, 2, 0, 0), kt.reason[t.index(3, 0, 0)]], ["pushed by a piston", 0]);
+  const u = await build(4, 1, 1, { "0,0,0": "minecraft:piston[extended=false,facing=east]", "1,0,0": "minecraft:torch", "2,0,0": "minecraft:stone" });
+  const ku = classify(u);
+  assert.deepEqual([whyAt(u, ku, 1, 0, 0), ku.reason[u.index(2, 0, 0)]], ["pushed by a piston", 0]);
+});

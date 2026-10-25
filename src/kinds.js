@@ -66,6 +66,8 @@ const R = { core: 1, holds: 2, powered: 3, watched: 4, read: 5, pushed: 6, fed: 
 
 // what the neighbour rules ask of a block
 const NOT_SOLID = /glass|slab|stairs|fence|_wall$|pane|door|leaves|torch|sign|banner|button|lever|rail|carpet|pressure_plate|flower|grass(?!_block)|fern|water|lava|ladder|vine|chain|bars|lantern|candle|pot$|potted_|head$|skull$|_bed$|scaffolding|^minecraft:snow$|cobweb|sapling|mushroom$|coral|kelp|seagrass|bush|petals|roots|dripleaf|plant|tripwire|redstone_wire|repeater|comparator|chest$|cauldron|lectern|campfire|anvil|bell$|cake|composter|brewing_stand|enchanting_table|grindstone|stonecutter|end_rod|conduit|_shelf$/;
+// what a piston breaks rather than moves (it ends the line it pushes)
+const BREAKS = /torch|flower|grass(?!_block)|fern|sapling|mushroom$|vine|carpet|ladder|lever|button|redstone_wire|repeater|comparator|pressure_plate|tripwire|_bed$|door|cake|candle|lantern|cobweb|^minecraft:snow$|bush|seagrass|kelp|coral|dripleaf|petals|roots|potted_|flower_pot|^minecraft:(pumpkin|melon|carved_pumpkin|jack_o_lantern)$/;
 const READABLE = /jukebox|lectern|cake|composter|beehive|bee_nest|cauldron|respawn_anchor|end_portal_frame|chiseled_bookshelf|drawer|crafter/;
 const IMMOVABLE = /obsidian|bedrock|respawn_anchor|reinforced_deepslate|end_portal|end_gateway|spawner|enchanting_table|beacon|jukebox|lectern|_sign$|_banner$|bell$|conduit|barrier|command_block|structure_block|jigsaw|_head$|_skull$/;
 const WORKED = /_door$|_trapdoor$|_fence_gate$|note_block$|bell$|tnt$|redstone_lamp$|copper_bulb$|dispenser$|dropper$|piston$/;
@@ -94,7 +96,7 @@ export function kindsOfId(id) {
 export function classify(schem, { shellCells = new Map(), meta = null } = {}) {
   const { width: W, length: L, keys, data } = schem, layer = W * L, n = data.length;
   const P = keys.length, base = new Uint16Array(P), isAir = new Uint8Array(P), isLog = new Uint8Array(P), isLeaf = new Uint8Array(P);
-  const solid = new Uint8Array(P), readable = new Uint8Array(P), immovable = new Uint8Array(P), worked = new Uint8Array(P), props = new Array(P), ids = new Array(P);
+  const solid = new Uint8Array(P), readable = new Uint8Array(P), immovable = new Uint8Array(P), worked = new Uint8Array(P), breaks = new Uint8Array(P), props = new Array(P), ids = new Array(P);
   keys.forEach((k, p) => {
     if (!k || schem.air.has(p)) { isAir[p] = 1; return; }
     const id = baseId(k); ids[p] = id; props[p] = propsOf(k);
@@ -105,6 +107,7 @@ export function classify(schem, { shellCells = new Map(), meta = null } = {}) {
     readable[p] = base[p] & STORAGE_BIT || READABLE.test(id) ? 1 : 0;
     immovable[p] = base[p] & STORAGE_BIT || IMMOVABLE.test(id) ? 1 : 0;
     worked[p] = WORKED.test(id) ? 1 : 0;
+    breaks[p] = BREAKS.test(id) ? 1 : 0;
   });
   // a neighbour's index, or -1 off the box
   const step = (i, [dx, dy, dz], k = 1) => {
@@ -158,14 +161,17 @@ export function classify(schem, { shellCells = new Map(), meta = null } = {}) {
       else if (behind >= 0 && solid[data[behind]] && further >= 0 && readable[data[further]]) { pull(behind, R.read); pull(further, R.read); }
     }
     if (/:observer$/.test(id) && f) { pull(step(i, f), R.watched); pullIf(step(i, back(f)), solid, R.powered); }
-    if (/:(sticky_)?piston$/.test(id) && f) {
+    // a retracted piston pushes the line in front of it; an extended one has pushed it, and a sticky one pulls back the
+    // block stuck to its head. A block a piston breaks (a plant, a torch) is moved out of the way and ends the line.
+    if (/:(sticky_)?piston$/.test(id) && f && pr.extended !== "true") {
       for (let k = 1, moved = 0; k <= 13 && moved < 12; k++) {
         const j = step(i, f, k); if (j < 0 || isAir[data[j]]) break;
-        if (/:(piston_head|moving_piston)$/.test(ids[data[j]])) continue;
         if (immovable[data[j]]) break;
         pull(j, R.pushed); moved++;
+        if (breaks[data[j]]) break;
       }
     }
+    if (/:sticky_piston$/.test(id) && f && pr.extended === "true") { const j = step(i, f, 2); if (j >= 0 && !immovable[data[j]] && !breaks[data[j]]) pull(j, R.pushed); }
     if (/:hopper$/.test(id)) { if (f) pullIf(step(i, f), readable, R.fed); pullIf(above, readable, R.fed); }
     if (/:dropper$/.test(id) && f) pullIf(step(i, f), readable, R.fed);   // a dispenser throws items out, a dropper puts them in
   }
