@@ -124,11 +124,15 @@ export class Schematic {
   /** The metadata entry of a cell (file coordinates): the metadata is by world position (file position + offset). */
   metaAt(meta, x, y, z) { const [ox, oy, oz] = this.offset; return meta?.at(x + ox, y + oy, z + oz) ?? null; }
   /** The metadata record of cell `i` (a BlockMeta over this file's box is read by index, without a position). */
-  metaAtIndex(meta, i) {
-    if (meta instanceof BlockMeta && meta.alignedWith(this.offset, [this.width, this.height, this.length])) return meta.recordAt(i);
-    // a box of its own: by world position, worked out without an array a cell (scans call this for every cell)
-    const W = this.width, per = this.perLayer, y = (i / per) | 0, r = i - y * per, z = (r / W) | 0, x = r - z * W;
-    return meta?.at(x + this.offset[0], y + this.offset[1], z + this.offset[2]) ?? null;
+  metaAtIndex(meta, i) { return this.recordReader(meta)(i); }
+  /** A reader of each cell's metadata record by index (null where none), worked out once for the metadata: a scan
+   *  over every cell takes one and calls it, rather than checking the metadata's box a cell at a time. */
+  recordReader(meta) {
+    if (!meta) return () => null;
+    if (meta.alignedWith(this.offset, [this.width, this.height, this.length])) return (i) => meta.recordAt(i);
+    // a box of its own: by world position, worked out without an array a cell
+    const W = this.width, per = this.perLayer, [ox, oy, oz] = this.offset;
+    return (i) => { const y = (i / per) | 0, r = i - y * per, z = (r / W) | 0, x = r - z * W; return meta.at(x + ox, y + oy, z + oz); };
   }
 
   /** Every shell cell: Map of block index -> part, how many cells each part has, and the share of the footprint the
@@ -137,11 +141,12 @@ export class Schematic {
     if (meta && !meta.records.some((m) => shellPart(m))) meta = null;
     const roofed = this.info().roof;
     const parts = new Map(), counts = { roof: 0, wall: 0, floor: 0 };
+    const recordAt = this.recordReader(meta);
     for (let i = 0; i < this.data.length; i++) {
       if (this.air.has(this.data[i])) continue;
       const [x, y, z] = this.cellOf(i);
       let part = null;
-      if (meta) part = shellPart(this.metaAtIndex(meta, i));
+      if (meta) part = shellPart(recordAt(i));
       else if (roofed && INERT.test(baseId(this.idAt(i)))) part = y === this.height - 1 ? "roof" : y === 0 ? "floor" : x === 0 || x === this.width - 1 || z === 0 || z === this.length - 1 ? "wall" : null;
       if (part) { parts.set(i, part); counts[part]++; }
     }
@@ -157,7 +162,8 @@ export class Schematic {
       const at = meta.mapRecords((m) => place.get(partOf(m)) ?? 0);
       for (let i = 0; i < out.length; i++) { const r = meta.cells[i]; if (r) out[i] = at[r - 1]; }
     } else if (meta) {
-      for (let i = 0; i < out.length; i++) out[i] = place.get(partOf(this.metaAtIndex(meta, i))) ?? 0;
+      const recordAt = this.recordReader(meta);
+      for (let i = 0; i < out.length; i++) out[i] = place.get(partOf(recordAt(i))) ?? 0;
     }
     return out;
   }
