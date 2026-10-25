@@ -11,7 +11,7 @@ const MODDED = /^(?!minecraft:)/;
 const modded = (t) => (id) => MODDED.test(id) && (typeof t === "function" ? t(id) : t.test(id));
 const either = (...tests) => (id) => tests.some((t) => (typeof t === "function" ? t(id) : t.test(id)));
 
-const REDSTONE_CORE = /^minecraft:(redstone_wire|repeater|comparator|observer|redstone_(wall_)?torch|redstone_block|lever|.*_button|.*_pressure_plate|tripwire(_hook)?|daylight_detector|target|note_block|(sticky_)?piston|piston_head|moving_piston|dispenser|dropper|hopper|powered_rail|detector_rail|activator_rail|redstone_lamp|tnt|trapped_chest|iron_door|iron_trapdoor|(calibrated_)?sculk_sensor|sculk_shrieker|.*copper_bulb|crafter|lightning_rod)$/;
+const REDSTONE_CORE = /^minecraft:(redstone_wire|repeater|comparator|observer|redstone_(wall_)?torch|redstone_block|lever|.*_button|.*_pressure_plate|tripwire(_hook)?|daylight_detector|target|note_block|(sticky_)?piston|piston_head|moving_piston|dispenser|dropper|hopper|powered_rail|detector_rail|activator_rail|redstone_lamp|tnt|trapped_chest|iron_door|iron_trapdoor|(calibrated_)?sculk_sensor|sculk_shrieker|.*copper_bulb|crafter|.*lightning_rod)$/;
 const STORAGE = /^minecraft:(chest|trapped_chest|ender_chest|.*copper_chest|barrel|.*shulker_box|hopper|dropper|dispenser|(blast_)?furnace|smoker|brewing_stand|chiseled_bookshelf|decorated_pot)$/;
 // a tree's crown: leaves, and a nether fungus's wart blocks and a huge mushroom's caps
 const LEAVES = either(/_leaves$|_sapling$|_blossoms$/, /^minecraft:(mangrove_roots|muddy_mangrove_roots|mangrove_propagule|(flowering_)?azalea|nether_wart_block|warped_wart_block|(brown|red)_mushroom_block)$/);

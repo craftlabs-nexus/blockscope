@@ -224,3 +224,7 @@ test("redstone: the one hop goes from what gives power, and takes both halves of
   assert.deepEqual([kindsAt(s, k, 1, 0, 0), kindsAt(s, k, 1, 1, 0)], [["openings"], ["openings"]], "a hopper takes power, it gives none");
   assert.deepEqual([whyAt(s, k, 4, 0, 0), whyAt(s, k, 4, 1, 0)], ["worked by a component", "worked by a component"]);
 });
+
+test("redstone: a lightning rod in every weathering", () => {
+  for (const id of ["lightning_rod", "exposed_lightning_rod", "waxed_oxidized_lightning_rod"]) assert.ok(kindsOfId(`minecraft:${id}`) & KIND_BIT.redstone, id);
+});
