@@ -32,8 +32,11 @@ export class LoadState {
     return p.asked !== askedNow;
   }
 
-  /** A load failed: the renderer still has what it had. */
-  failed() { this.pending = null; }
+  /** A load failed. The renderer removes what it had before it reads a new file, so it holds nothing now. */
+  failed() { this.pending = null; this.dropped(); }
+
+  /** The renderer's file was taken out of it (another one is about to be loaded): it holds none. */
+  dropped() { this.file = null; this.hidden = null; this.cut = false; }
 
   /** Whether a whole load of `file` is on its way, so a change can wait for it (arrived() says to show it). */
   coming(file) { return !!this.pending && this.pending.file === file && !this.pending.cut && this.live; }

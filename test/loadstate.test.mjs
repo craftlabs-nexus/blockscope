@@ -18,11 +18,13 @@ test("a second file: once its load is in, the renderer holds it and a change dra
   assert.deepEqual([s.holds(b), s.coming(b)], [true, false]);
 });
 
-test("a failed load leaves the renderer with what it had; a cut load is never waited for", () => {
+test("a failed load or a dropped file leaves the renderer with nothing; a cut load is never waited for", () => {
   const s = new LoadState(), a = { name: "a" }, b = { name: "b" };
   s.begin({ file: a, hidden: null, cut: false, asked: "k" }); s.arrived("k");
   s.begin({ file: b, hidden: null, cut: false, asked: "k" }); s.failed();
-  assert.deepEqual([s.holds(a), s.coming(b), s.arrived("k")], [true, false, false]);
+  assert.deepEqual([s.holds(a), s.coming(b), s.arrived("k")], [false, false, false], "the renderer drops its file before reading another");
+  s.begin({ file: a, hidden: null, cut: false, asked: "k" }); s.arrived("k"); s.dropped();
+  assert.equal(s.holds(a), false, "taken out before a pack switch: it holds nothing");
   s.begin({ file: b, hidden: new Set(), cut: true, asked: "k" });
   assert.equal(s.coming(b), false, "a cut file carries only what was asked: a change loads again");
   s.arrived("k");

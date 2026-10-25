@@ -676,6 +676,8 @@ async function startRenderer() {
           else { so.setCellGroups(cellGroupsNow()); so.showCells(rangeNow(), hiddenGroupsNow()); }
         },
         onSchematicRendered: () => {
+          // a build of a file no longer open (a rebuild of it still running when another was opened) changes nothing
+          if (loaded.file !== file) return;
           // a build that cannot show some cells (or a renderer without it), or a whole file from before that was
           // found out, while something is hidden: the file is loaded again with only what is drawn
           const so = schematicObject();
@@ -708,14 +710,32 @@ async function startRenderer() {
 }
 /** Opens a file record (a plan file or one from disk): the first starts the renderer, a later one replaces the file
  *  and switches the pack when its mods differ. */
+// The last file opened wins: an open still reading its file when another begins stops there. The first file starts
+// the renderer, once; a file opened while it starts is loaded when it is up.
+let openSeq = 0, rendererStart = null;
 async function openFile(rec, opts = {}) {
+  const mine = ++openSeq, current = () => mine === openSeq;
   let f;
   try { f = await readFile(rec); } catch (e) { status(`${rec.name}: ${e.message}`, "err"); return; }
   setFile(f, opts);
-  if (!renderer) { await startRenderer(); return; }
-  try { await ensurePack(); } catch (e) { status(`pack: ${e.message}`, "err"); }
+  if (!renderer) {
+    if (!rendererStart) { rendererStart = startRenderer(); await rendererStart; return; }
+    await rendererStart; if (!current()) return;
+  }
+  // a pack switch rebuilds what the renderer holds: the last file goes first, rather than being built again for nothing
+  try {
+    if ((await packName(file.schem, source)) !== currentPack && current() && loaded.file !== file) await dropLoadedFile();
+    if (current()) await ensurePack();
+  } catch (e) { status(`pack: ${e.message}`, "err"); }
+  if (!current()) return;
   await reloadLayers(`${schemName}`);
   syncUrl(true);
+}
+/** Takes the renderer's file out of it (another file is about to be loaded, with another pack). */
+async function dropLoadedFile() {
+  if (!schematicObject()) return;
+  try { await renderer.schematicManager.removeSchematic(SCHEM_ID); } catch {}
+  loaded.dropped();
 }
 
 // OrbitControls' damping keeps turning the camera after a drag ends; a view key or button stops that spin first, so
