@@ -40,7 +40,7 @@ export function createMaterials(host) {
     if (partCache.schem !== schem || partCache.meta !== meta) {
       const names = host.parts().map((p) => p.name), at = new Map(names.map((n, i) => [n, i]));
       const idx = new Int16Array(schem.data.length).fill(-1);
-      for (let i = 0; i < schem.data.length; i++) { if (schem.air.has(schem.data[i])) continue; const [x, y, z] = schem.cellOf(i); const p = partOf(schem.metaAt(meta, x, y, z)); if (p && at.has(p)) idx[i] = at.get(p); }
+      for (let i = 0; i < schem.data.length; i++) { if (schem.air.has(schem.data[i])) continue; const p = partOf(schem.metaAtIndex(meta, i)); if (p && at.has(p)) idx[i] = at.get(p); }
       partCache = { schem, meta, names, idx };
     }
     const { names, idx } = partCache, last = names.length;

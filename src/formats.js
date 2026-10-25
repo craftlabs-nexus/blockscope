@@ -6,6 +6,7 @@
 //   Vanilla structure (.nbt): its palette (the first of `palettes` when there are several) and its blocks; a cell the
 //     file does not list is air.
 // The values keep the NBT reader's types (numbers as { t, v }, lists as { t: 9, et, v }), so the result encodes back.
+import { BlockMeta } from "./blockmeta.js";
 import { encodeVarints } from "./nbt.js";
 
 const i16 = (v) => ({ t: 2, v }), i32 = (v) => ({ t: 3, v });
@@ -146,14 +147,11 @@ export function readBlockInfo(value) {
   const b = r?.Metadata?.BlockInfo ?? r?.BlockInfo;
   if (!b || num(b.Version) !== 1 || !b.Cells || !b.Size) return null;
   const origin = b.Origin ? Array.from(b.Origin, Number) : [0, 0, 0];
-  const [W, , L] = Array.from(b.Size, Number);
   const records = list(b.Records).map((rec) => Object.fromEntries(Object.entries(rec).map(([k, v]) => [k, typeof v === "string" ? v : v?.t === 9 ? v.v.map((x) => (typeof x === "string" ? x : num(x))) : num(v)])));
-  const meta = {}, cells = b.Cells;
-  for (let i = 0; i < cells.length; i++) {
-    const n = cells[i]; if (!n || !records[n - 1]) continue;
-    const x = i % W, z = Math.floor(i / W) % L, y = Math.floor(i / (W * L));
-    meta[`${x + origin[0]},${y + origin[1]},${z + origin[2]}`] = records[n - 1];
-  }
+  // the cells as they come: a record index + 1 a cell, x fastest, then z, then y (an index past the records: none)
+  const size = Array.from(b.Size, Number), raw = b.Cells.v ?? b.Cells, cells = new Uint32Array(size[0] * size[1] * size[2]);
+  for (let i = 0; i < cells.length && i < raw.length; i++) { const n = num(raw[i]); if (n > 0 && records[n - 1]) cells[i] = n; }
+  const meta = new BlockMeta(origin, size, cells, records);
   // the parts in the order the generator lists them, when it says
   const parts = b.Parts ? list(b.Parts).filter((n) => typeof n === "string") : null;
   return { origin, meta, parts: parts?.length ? parts : null };

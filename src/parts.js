@@ -27,7 +27,12 @@ const partSort = (a, b) => rank(a) - rank(b) || a.localeCompare(b);
  *  (`order`, BlockInfo Parts), any part it does not name after those; else the order above. */
 export function partsOf(meta, order = null) {
   const counts = new Map();
-  for (const m of Object.values(meta)) { const p = partOf(m); if (p) counts.set(p, (counts.get(p) ?? 0) + 1); }
+  if (Array.isArray(meta?.records) && meta.cells) {
+    // a BlockMeta: each record's part once, then the cells counted by record
+    const perRecord = new Uint32Array(meta.records.length + 1);
+    for (let i = 0; i < meta.cells.length; i++) perRecord[meta.cells[i]]++;
+    meta.records.forEach((m, r) => { const p = partOf(m); if (p && perRecord[r + 1]) counts.set(p, (counts.get(p) ?? 0) + perRecord[r + 1]); });
+  } else for (const m of Object.values(meta)) { const p = partOf(m); if (p) counts.set(p, (counts.get(p) ?? 0) + 1); }
   const at = new Map((order ?? []).map((n, i) => [n, i])), pos = (n) => at.get(n) ?? Infinity;
   return [...counts].sort(([a], [b]) => (order ? pos(a) - pos(b) || 0 : 0) || partSort(a, b)).map(([name, count]) => ({ name, count }));
 }

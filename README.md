@@ -198,6 +198,7 @@ publishes them is not part of this repository.
 | `index.html`, `src/main.js` | the page |
 | `src/schematic.js`, `src/nbt.js` | the schematic in memory: NBT in the browser, info, shell, parts, signs, layer counts, the file the renderer gets |
 | `src/layers.js` | where a layer step lands: the nearest layer that changes what is drawn |
+| `src/blockmeta.js` | the block metadata (BlockInfo, a .meta.json, a Litematica file's regions) kept as a record index a cell |
 | `src/formats.js` | Litematica and structure files turned into Sponge ones, and the block metadata, mod list and description a file carries |
 | `src/parts.js`, `src/framed.js`, `src/decorated.js` | the plan's parts and shell from its metadata; framed drawers' ids per material set; patterned banners' and sherd pots' ids per design |
 | `src/plans.js` | plan files: the schematic, its metadata and paintings |

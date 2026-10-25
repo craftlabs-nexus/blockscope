@@ -11,6 +11,7 @@ import { formatOf, litematicToSponge, structureToSponge, readBlockInfo, readMods
 import { framedKind, framedViewerId } from "./framed.js";
 import { decoratedViewerId } from "./decorated.js";
 import { partOf, shellPart } from "./parts.js";
+import { BlockMeta } from "./blockmeta.js";
 
 const AIR = /^minecraft:(cave_|void_)?air$/;
 const baseId = (key) => key.replace(/\[.*$/, "");
@@ -64,7 +65,7 @@ export class Schematic {
     this.name = name;
     this.nbt = nbt;
     this.format = format;   // sponge, litematic, structure, or converted (by Nucleation)
-    /** The file's own block metadata (keyed "x,y,z" in world coordinates) or null; metaSource says where any came
+    /** The file's own block metadata (a BlockMeta: a record a cell, by world position) or null; metaSource says where any came
      *  from: "file" (BlockInfo), "regions" (a Litematica file's), or null. regions: a Litematica file's, else null. */
     this.meta = info?.meta ?? null;
     this.metaSource = this.meta ? "file" : null;
@@ -93,13 +94,11 @@ export class Schematic {
   #useRegions(regions, regionOf) {
     this.regions = regions;
     if (this.meta) return;
-    const meta = {}, [ox, oy, oz] = this.offset, entry = regions.map((r) => ({ part: r.name }));
-    for (let i = 0; i < regionOf.length; i++) {
-      if (!regionOf[i]) continue;
-      const [x, y, z] = this.cellOf(i);
-      meta[`${x + ox},${y + oy},${z + oz}`] = entry[regionOf[i] - 1];
-    }
-    this.meta = meta; this.metaSource = "regions";
+    // each placed block's region is its record: the cells are the region numbers as they are
+    const cells = new Uint32Array(this.data.length);
+    for (let i = 0; i < regionOf.length && i < cells.length; i++) cells[i] = regionOf[i] || 0;
+    this.meta = new BlockMeta(this.offset, [this.width, this.height, this.length], cells, regions.map((r) => ({ part: r.name })));
+    this.metaSource = "regions";
   }
 
   get perLayer() { return this.width * this.length; }
@@ -123,19 +122,28 @@ export class Schematic {
   }
 
   /** The metadata entry of a cell (file coordinates), keyed by world position in the meta file. */
-  metaAt(meta, x, y, z) { const [ox, oy, oz] = this.offset; return meta?.[`${x + ox},${y + oy},${z + oz}`] ?? null; }
+  metaAt(meta, x, y, z) {
+    const [ox, oy, oz] = this.offset;
+    if (meta instanceof BlockMeta) return meta.at(x + ox, y + oy, z + oz);
+    return meta?.[`${x + ox},${y + oy},${z + oz}`] ?? null;
+  }
+  /** The metadata record of cell `i` (a BlockMeta over this file's box is read by index, without a position). */
+  metaAtIndex(meta, i) {
+    if (meta instanceof BlockMeta && meta.alignedWith(this.offset, [this.width, this.height, this.length])) return meta.recordAt(i);
+    const [x, y, z] = this.cellOf(i); return this.metaAt(meta, x, y, z);
+  }
 
   /** Every shell cell: Map of block index -> part, how many cells each part has, and the share of the footprint the
    *  roof covers. From the metadata when it tags any shell, else the inert blocks on the outside of a roofed box. */
   shellOf(meta) {
-    if (meta && !Object.values(meta).some((m) => shellPart(m))) meta = null;
+    if (meta && !(meta instanceof BlockMeta ? meta.records : Object.values(meta)).some((m) => shellPart(m))) meta = null;
     const roofed = this.info().roof;
     const parts = new Map(), counts = { roof: 0, wall: 0, floor: 0 };
     for (let i = 0; i < this.data.length; i++) {
       if (this.air.has(this.data[i])) continue;
       const [x, y, z] = this.cellOf(i);
       let part = null;
-      if (meta) part = shellPart(this.metaAt(meta, x, y, z));
+      if (meta) part = shellPart(this.metaAtIndex(meta, i));
       else if (roofed && INERT.test(baseId(this.idAt(i)))) part = y === this.height - 1 ? "roof" : y === 0 ? "floor" : x === 0 || x === this.width - 1 || z === 0 || z === this.length - 1 ? "wall" : null;
       if (part) { parts.set(i, part); counts[part]++; }
     }
@@ -150,14 +158,12 @@ export class Schematic {
   cellGroups(meta, partNames, shellCells) {
     const out = new Uint16Array(this.data.length);
     const place = new Map(partNames.map((n, i) => [n, i + 1]));
-    if (meta) {
-      const [ox, oy, oz] = this.offset;
-      for (const [k, m] of Object.entries(meta)) {
-        const at = place.get(partOf(m)); if (!at) continue;
-        const [x, y, z] = k.split(",").map(Number), lx = x - ox, ly = y - oy, lz = z - oz;
-        if (lx < 0 || ly < 0 || lz < 0 || lx >= this.width || ly >= this.height || lz >= this.length) continue;
-        out[this.index(lx, ly, lz)] = at * 4;
-      }
+    if (meta instanceof BlockMeta && meta.alignedWith(this.offset, [this.width, this.height, this.length])) {
+      // a record's part once, then a typed-array pass over the cells
+      const group = meta.mapRecords((m) => (place.get(partOf(m)) ?? 0) * 4);
+      for (let i = 0; i < out.length; i++) { const r = meta.cells[i]; if (r) out[i] = group[r - 1]; }
+    } else if (meta) {
+      for (let i = 0; i < out.length; i++) { const at = place.get(partOf(this.metaAtIndex(meta, i))); if (at) out[i] = at * 4; }
     }
     for (const [i, role] of shellCells) out[i] += SHELL_ROLES.indexOf(role) + 1;
     return out;

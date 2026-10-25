@@ -22,6 +22,7 @@ import { esc } from "./html.js";
 import { prepareBook } from "./materials/engine.js";
 import { BOOK_FILE } from "./materials/book.js";
 import { stepTarget, filledLayers } from "./layers.js";
+import { asBlockMeta } from "./blockmeta.js";
 
 const $ = (id) => document.getElementById(id);
 // Anything that breaks the page shows in the status line, not only in the console.
@@ -58,7 +59,7 @@ const hiddenPartSet = new Set();
 const shellOfMeta = shellPart;
 // whether a cell (world coordinates) is hidden, for the overlays the page draws itself (paintings hang on a block)
 const cellHidden = (x, y, z) => {
-  const m = meta?.[`${x},${y},${z}`]; if (!m) return false;
+  const m = meta?.at(x, y, z); if (!m) return false;
   const sp = shellOfMeta(m);
   if (sp && !shell[sp]) return true;
   const p = partOf(m); return !!p && hiddenPartSet.has(p);
@@ -94,8 +95,10 @@ const signAt = new Map(), paintingAt = new Map();
 /** Makes `f` the loaded file: reads its info, shell and parts and resets the controls (the URL's on the first load). */
 function setFile(f, { fromUrl = false } = {}) {
   file = f; schemName = f.name;
+  pinned.cell = null;   // the last file's pin (a link's ?at= pins in the new one once it is drawn)
   const own = f.schem.metaSource === "file" ? f.schem.meta : null;
-  meta = own ?? f.meta ?? f.schem.meta ?? null;
+  // a .meta.json's object, as the file's own, kept a record a cell (blockmeta.js)
+  meta = asBlockMeta(own ?? f.meta ?? f.schem.meta ?? null, f.schem.offset, [f.schem.width, f.schem.height, f.schem.length]);
   metaFrom = own ? "the file's own metadata" : f.meta ? `${f.name.replace(/\.[^.]+$/, "")}.meta.json` : f.schem.metaSource === "regions" ? "the Litematica file's regions" : "";
   $("partsGrp").querySelector("summary").title = `The file's parts, from ${metaFrom || "its metadata"}: hover to light one up, click the eye to hide it, solo to see it alone, click the name to fly to it`;
   $("schemName").textContent = schemName;
@@ -353,13 +356,14 @@ const pinned = { cell: null, wanted: null };
 let focusWanted = null;   // a link's ?focus= ({ block: [x, y, z] } world, or { part }), applied once the view settles
 let digitsWanted = null;   // a link's ?digits= (true or false), applied once the file is drawn
 function placeBox(which, cell) { attachMarks(); const box = which === "pin" ? pinBox : hoverBox; if (!box) return; if (!cell) { box.visible = false; } else { box.position.set(...cellCenter(cell.x, cell.y, cell.z)); box.visible = true; } redraw(); }
-// a part's cells (file coordinates) from the metadata, once per part; the ghost shows the ones in the layer range
-// whose shell part is not hidden (a hidden part still shows, that is what the ghost is for)
+// a part's cells (file coordinates, and the shell role) from the cell groups' lists (groupCellsNow: worked out once
+// per file), once per part; the ghost shows the ones in the layer range whose shell part is not hidden (a hidden part
+// still shows, that is what the ghost is for)
 const partCells = new Map();
 function cellsOfPart(name) {
   if (partCells.has(name)) return partCells.get(name);
-  const out = []; const [ox, oy, oz] = info.offset;
-  for (const [k, m] of Object.entries(meta ?? {})) if (partOf(m) === name) { const [x, y, z] = k.split(",").map(Number); out.push([x - ox, y - oy, z - oz, shellOfMeta(m)]); }
+  const out = [], at = info.parts.findIndex((p) => p.name === name) + 1, lists = groupCellsNow();
+  if (at > 0) for (let role = 0; role < 4; role++) for (const i of lists.get(at * 4 + role) ?? []) out.push([...file.schem.cellOf(i), role ? SHELL_ROLES[role - 1] : null]);
   partCells.set(name, out); return out;
 }
 function showGhost(name) {
@@ -848,10 +852,12 @@ function describeBlock(so, x, y, z) {
     const frame = framed ? `side ${matName(framed.side)} / trim ${matName(framed.trim)}${framed.kind === "trim" ? "" : ` / front ${matName(framed.front)}`}` : null;
     const state = b ? Object.entries(b.properties()) : [];
     const [ox, oy, oz] = info.offset;
-    const part = meta?.[`${x + ox},${y + oy},${z + oz}`] ?? null;   // the generator keys by world position (file position + offset)
-    // a shell block the page hides is air in the rendered file; its metadata still names it, so say so
-    const hidden = id === "minecraft:air" && part ? shellOfMeta(part) ?? (hiddenPartSet.has(partOf(part)) ? `part ${partOf(part)}` : null) : null;
-    if (hidden) id = `air (hidden ${hidden})`;
+    const part = meta?.at(x + ox, y + oy, z + oz) ?? null;   // the generator keys by world position (file position + offset)
+    // a block of a hidden shell part or part: the renderer holds it but does not draw it (or, where it cannot, it is
+    // air in the file it has); say what hides it
+    const sp = part ? shellOfMeta(part) : null, pn = part ? partOf(part) : null;
+    const hidden = sp && !shell[sp] ? sp : pn && hiddenPartSet.has(pn) ? `part ${pn}` : null;
+    if (hidden) id = `${id === "minecraft:air" ? "air" : id} (hidden ${hidden})`;
     // what the file and the page know about it: a sign's text (dye, glow, waxed, back side), a painting on this block;
     // `quote` is the short form a copy carries (the sign's front text, the painting's label)
     const k = `${x},${y},${z}`, s = signAt.get(k), p = paintingAt.get(k);
@@ -868,7 +874,7 @@ function blockText(d) {
   const clip = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
   const [wx, wy, wz] = d.world, { x, y, z } = d.cell;
   const state = d.state.length ? `[${d.state.map(([k, v]) => `${k}=${v}`).join(",")}]` : "";
-  const lines = [`${schemName}  x ${wx} y ${wy} z ${wz}  (file ${x},${y},${z})`, d.hidden ? `minecraft:air (hidden: ${d.hidden})` : `${d.id}${state}`];
+  const lines = [`${schemName}  x ${wx} y ${wy} z ${wz}  (file ${x},${y},${z})`, d.hidden ? `${d.id.replace(/ \(hidden .*\)$/, "").replace(/^air$/, "minecraft:air")}${state} (hidden: ${d.hidden})` : `${d.id}${state}`];
   const pn = d.part ? partOf(d.part) : null;
   const code = d.part?.code ? `code ${d.part.code}${d.part.line ? `, line ${d.part.line}` : ""}` : null;
   const partLine = [pn && `part ${pn}`, code].filter(Boolean).join(" · ");
@@ -923,7 +929,7 @@ function showBlock(d) {
   if (d.part?.code) row("code", "mono dim", d.part.line ? `${d.part.code}, line ${d.part.line}` : d.part.code);
   const pn = d.part ? partOf(d.part) : null;
   if (pn && info.parts.some((p) => p.name === pn)) row("part", "", (v) => { const a = document.createElement("a"); a.className = "lnk"; a.textContent = pn; a.title = "Show this part in the Parts list"; a.onclick = () => revealPartRow(pn); v.append(a); });
-  else if (!d.part && meta) row("part", "dim", Object.keys(meta).length ? "not in the metadata" : "no metadata for this file");
+  else if (!d.part && meta) row("part", "dim", meta.count ? "not in the metadata" : "no metadata for this file");
 }
 // Shell toggles: Roof, Walls and Floor reload the schematic with that part turned to air so the inside is visible.
 // Each button is a toggle, lit while the part is shown; a part the file does not have is disabled.

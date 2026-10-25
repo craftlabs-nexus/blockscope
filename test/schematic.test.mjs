@@ -146,7 +146,7 @@ test("block metadata in the file: Sponge Metadata, litematic and structure roots
   const sp = sample(); sp.value.Metadata = { Name: "t", BlockInfo: blockInfo([10, 64, -5], [3, 4, 2], [[[0, 0, 0], rec]]) };
   const s = await Schematic.load(await gzip(encodeNbt(sp)), "t.schem");
   assert.equal(s.metaSource, "file");
-  assert.deepEqual(s.meta, { "10,64,-5": { owner: "aisle 1", part: "Aisle 1", ids: ["minecraft:stone", "minecraft:dirt"] } });
+  assert.deepEqual([...s.meta.entries()], [[[10, 64, -5], { owner: "aisle 1", part: "Aisle 1", ids: ["minecraft:stone", "minecraft:dirt"] }]]);
   assert.deepEqual(s.metaAt(s.meta, 0, 0, 0)?.part, "Aisle 1");
   // the renderer's file leaves it out
   const out = await readNbt(await s.render());
@@ -188,4 +188,21 @@ test("the file's mod list: read from the file, only Modrinth's CDN with a sha512
   assert.deepEqual(a.entries.map((e) => [e.filename, e.origin.url.startsWith("https://cdn.modrinth.com/"), e.sha512.length]), [["storagedrawers.jar", true, 128], ["promenade.jar", true, 128]]);
   assert.deepEqual(src.provides().get(a.entries[0].key), { storagedrawers: 1 });
   assert.equal(fileSource({ list: [] }), null);
+});
+
+test("block metadata kept a record a cell: by world position, by a file's cell index, and from a .meta.json", async () => {
+  const { BlockMeta, asBlockMeta } = await import("../src/blockmeta.js");
+  const shared = { owner: "room", role: "wall north" };
+  // a 2 × 1 × 2 box at world (5, 60, 7): three cells tagged, two with the same record
+  const meta = asBlockMeta({ "5,60,7": { part: "a" }, "6,60,7": shared, "6,60,8": shared, "9,9,9": { part: "outside" } }, [5, 60, 7], [2, 1, 2]);
+  assert.ok(meta instanceof BlockMeta);
+  assert.equal(meta.count, 3);
+  assert.equal(meta.records.length, 2, "the shared record kept once, the one outside the box left out");
+  assert.deepEqual(meta.at(5, 60, 7), { part: "a" });
+  assert.equal(meta.at(6, 60, 8), shared);
+  assert.equal(meta.at(5, 60, 8), null);
+  assert.equal(meta.at(4, 60, 7), null);
+  assert.equal(meta.recordAt(3), shared);   // (x 1, z 1): index (0 * 2 + 1) * 2 + 1
+  assert.ok(meta.alignedWith([5, 60, 7], [2, 1, 2]));
+  assert.deepEqual(partsOf(meta).map((p) => [p.name, p.count]), [["a", 1], ["room shell", 2]]);
 });
