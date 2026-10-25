@@ -483,7 +483,12 @@ function cellsOfRow(row) {
   else {
     const t = (blocks.types?.types.findIndex((x) => x.id === row.key) ?? -1) + 1;
     if (t && c.typed) test = (g) => c.type[g] === t;
-    else if (t) { const of = blocks.types.ofPalette, d = file.schem.data, idx = []; for (let i = 0; i < d.length; i++) if (of[d[i]] === t) idx.push(i); out = Int32Array.from(idx); }
+    else if (t) {
+      // a file whose groups leave types out: the type's cells by palette, counted, then copied (two typed passes)
+      const of = blocks.types.ofPalette, d = file.schem.data; let n = 0;
+      for (let i = 0; i < d.length; i++) if (of[d[i]] === t) n++;
+      out = new Int32Array(n); for (let i = 0, o = 0; i < d.length; i++) if (of[d[i]] === t) out[o++] = i;
+    }
   }
   if (!out) {
     const parts = []; let n = 0;
@@ -496,12 +501,15 @@ function cellsOfRow(row) {
  *  kind or type too: lighting it up is what the hover is for). */
 function shownCellsOfRow(row) {
   // a layer's cells are one run of indices; counted first, then copied, so a million cells are two typed-array passes
-  const [lo, hi] = shownRange(), per = file.schem.perLayer, c = codedNow(), all = cellsOfRow(row);
+  // (a family's straight from its types' lists, without joining them first)
+  const [lo, hi] = shownRange(), per = file.schem.perLayer, c = codedNow();
+  const lists = row.axis === "family" ? (blocks.families.find((x) => x.key === row.key)?.members ?? []).map((id) => cellsOfRow({ axis: "type", key: id })) : [cellsOfRow(row)];
   const sh = shellHiddenMask() & ~(row.axis === "kind" ? KIND_BIT[row.key] ?? 0 : 0), start = lo * per, end = (hi + 1) * per;
+  const shown = (i) => i >= start && i < end && !(c.kinds[c.groups[i]] & sh);
   let n = 0;
-  for (let j = 0; j < all.length; j++) { const i = all[j]; if (i >= start && i < end && !(c.kinds[c.groups[i]] & sh)) n++; }
-  const out = new Int32Array(n);
-  for (let j = 0, o = 0; j < all.length; j++) { const i = all[j]; if (i >= start && i < end && !(c.kinds[c.groups[i]] & sh)) out[o++] = i; }
+  for (const all of lists) for (let j = 0; j < all.length; j++) if (shown(all[j])) n++;
+  const out = new Int32Array(n); let o = 0;
+  for (const all of lists) for (let j = 0; j < all.length; j++) if (shown(all[j])) out[o++] = all[j];
   return out;
 }
 // past this many blocks a row lights up every few of them (the terrain: a million boxes would stall the page)
