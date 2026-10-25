@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { encodeNbt, gzip, encodeVarints } from "../src/nbt.js";
 import { Schematic } from "../src/schematic.js";
-import { classify, typesOf, familyOf, familiesOf, firstKinds, KIND_ORDER, codeGroups, HiddenCells, kindsOfId, kindsShown, kindsOfMask, KINDS, KIND_BIT, REDSTONE_REASONS, KINDS_MIN_BLOCKS, KINDS_MIN_SECOND } from "../src/kinds.js";
+import { classify, typesOf, onlyThese, familyOf, familiesOf, firstKinds, KIND_ORDER, codeGroups, HiddenCells, kindsOfId, kindsShown, kindsOfMask, KINDS, KIND_BIT, REDSTONE_REASONS, KINDS_MIN_BLOCKS, KINDS_MIN_SECOND } from "../src/kinds.js";
 
 const i32 = (v) => ({ t: 3, v }), i16 = (v) => ({ t: 2, v });
 
@@ -276,4 +276,11 @@ test("kinds of the ids the lists had missed", () => {
   const of = (id) => kindsOfMask(kindsOfId(`minecraft:${id}`));
   assert.deepEqual([of("open_eyeblossom"), of("sea_pickle"), of("potted_poppy"), of("oak_shelf"), of("light"), of("chorus_plant")], [["plants"], ["lighting", "plants"], ["plants"], ["storage"], ["lighting"], ["plants"]]);
   assert.equal(familyOf("minecraft:bamboo_sapling").by, null);
+});
+
+test("solo of a type or family: exactly those shown, and something hidden", () => {
+  const wool = ["minecraft:white_wool", "minecraft:red_wool"];
+  assert.equal(onlyThese(new Set(), 2, wool), false, "a file all of one family: nothing soloed");
+  assert.equal(onlyThese(new Set(["minecraft:stone"]), 3, wool), true);
+  assert.equal(onlyThese(new Set(["minecraft:red_wool"]), 3, ["minecraft:stone"]), false);
 });

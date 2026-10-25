@@ -8,7 +8,7 @@ import { analyzeFolder, analyzePackZip, detectPackZip, fromFileList } from "@cra
 import { Schematic } from "./schematic.js";
 import { cornersOf, fillWithoutOffset, fitInto } from "./view.js";
 import { LoadState } from "./loadstate.js";
-import { classify, typesOf, familiesOf, firstKinds, codeGroups, HiddenCells, KINDS, KIND_BIT, KIND_ORDER, REDSTONE_REASONS, kindsOfMask } from "./kinds.js";
+import { classify, typesOf, familiesOf, onlyThese, firstKinds, codeGroups, HiddenCells, KINDS, KIND_BIT, KIND_ORDER, REDSTONE_REASONS, kindsOfMask } from "./kinds.js";
 import { partOf, partsOf } from "./parts.js";
 import { framedRealId } from "./framed.js";
 import { decoratedRealId, DYES } from "./decorated.js";
@@ -1217,7 +1217,16 @@ const blockActs = new Map();   // the same keys -> { eye, solo }: what a row's b
 const openFamilies = new Set();   // the families listed open
 let blockSel = [];   // the rows picked: by the arrow keys in the filter (one), or a block's kinds (K)
 const soloedKind = () => (picking && onlyKinds.size === 1 ? [...onlyKinds][0] : null);
-const soloedType = () => { const t = blocks.types?.types ?? []; return t.length > 1 && hiddenTypes.size === t.length - 1 ? (t.find((x) => !hiddenTypes.has(x.id))?.id ?? null) : null; };
+/** Whether the types shown are exactly `ids` (every other one hidden, and some hidden): what solo means for a type or a
+ *  family. */
+const showsOnly = (ids) => onlyThese(hiddenTypes, blocks.types?.types.length ?? 0, ids);
+const soloedType = () => { const t = blocks.types?.types ?? []; return hiddenTypes.size === t.length - 1 ? (t.find((x) => showsOnly([x.id]))?.id ?? null) : null; };
+/** Shows only the types `ids` (a type, a family's), or every type again when they are what is shown alone. */
+function soloTypes(ids, name) {
+  const solo = showsOnly(ids), keep = new Set(ids);
+  hiddenTypes.clear(); if (!solo) for (const t of blocks.types.types) if (!keep.has(t.id)) hiddenTypes.add(t.id);
+  return blocksChanged(solo ? "every type" : `only ${name}`);
+}
 function renderBlocks() {
   const k = blocks.kinds, ty = blocks.types?.types ?? [];
   const showKinds = !!k?.shown, showTypes = ty.length >= 2;
@@ -1298,21 +1307,13 @@ function typeEntries() {
   }
   return out.sort((a, b) => b.count - a.count);
 }
-const soloedFamily = () => {
-  const ty = blocks.types?.types ?? [];
-  for (const fam of blocks.families) if (hiddenTypes.size === ty.length - fam.members.length && fam.members.every((id) => !hiddenTypes.has(id))) return fam.key;
-  return null;
-};
+const soloedFamily = () => blocks.families.find((fam) => showsOnly(fam.members))?.key ?? null;
 function toggleFamily(fam) {
   const all = fam.members.every((id) => hiddenTypes.has(id));
   for (const id of fam.members) if (all) hiddenTypes.delete(id); else hiddenTypes.add(id);
   return blocksChanged(`${all ? "with" : "without"} the ${fam.name}`);
 }
-function soloFamily(fam) {
-  const solo = soloedFamily() === fam.key, keep = new Set(fam.members);
-  hiddenTypes.clear(); if (!solo) for (const t of blocks.types.types) if (!keep.has(t.id)) hiddenTypes.add(t.id);
-  return blocksChanged(solo ? "every type" : `only the ${fam.name}`);
-}
+const soloFamily = (fam) => soloTypes(fam.members, `the ${fam.name}`);
 /** After a kind or type is hidden or shown: the lists, the shell buttons and the view follow. */
 function blocksChanged(what) { showShellState(); renderBlocks(); return reloadLayers(what); }
 function toggleKind(k) {
@@ -1333,11 +1334,7 @@ function toggleType(id) {
   if (hiddenTypes.has(id)) hiddenTypes.delete(id); else hiddenTypes.add(id);
   return blocksChanged(`${hiddenTypes.has(id) ? "without" : "with"} ${typeOf(id)?.name ?? id}`);
 }
-function soloType(id) {
-  const solo = soloedType() === id;
-  hiddenTypes.clear(); if (!solo) for (const t of blocks.types.types) if (t.id !== id) hiddenTypes.add(t.id);
-  return blocksChanged(solo ? "every type" : `only ${typeOf(id)?.name ?? id}`);
-}
+const soloType = (id) => soloTypes([id], typeOf(id)?.name ?? id);
 $("blocksAll").onclick = () => {
   hiddenKinds.clear(); onlyKinds.clear(); picking = false; hiddenTypes.clear();
   for (const k of SHELL_KEYS) if (blocks.kinds?.shown && blocks.kinds.listed.includes(k)) shell[k] = true;

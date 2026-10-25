@@ -358,3 +358,7 @@ export function familiesOf(types) {
     .map(({ colours, other, dyed, ...e }) => e)
     .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
 }
+
+/** Whether, of `count` types with those in `hidden` hidden, exactly `ids` are shown: what a type's or a family's solo
+ *  means. Not when nothing is hidden: a file whose types are all one family shows only it, but nothing is soloed. */
+export const onlyThese = (hidden, count, ids) => hidden.size > 0 && hidden.size === count - ids.length && ids.every((id) => !hidden.has(id));
