@@ -453,8 +453,10 @@ function cellsOfRow(row) {
   const c = codedNow(), lists = groupCellsNow();
   let out = null, test = () => false;
   if (row.axis === "family") {
+    // its types' cells joined, not kept: they are kept per type already
     const fam = blocks.families.find((x) => x.key === row.key), lists = (fam?.members ?? []).map((id) => cellsOfRow({ axis: "type", key: id }));
-    out = new Int32Array(lists.reduce((n, l) => n + l.length, 0)); let o = 0; for (const l of lists) { out.set(l, o); o += l.length; }
+    const joined = new Int32Array(lists.reduce((n, l) => n + l.length, 0)); let o = 0; for (const l of lists) { joined.set(l, o); o += l.length; }
+    return joined;
   } else if (row.axis === "part") { const at = info.parts.findIndex((p) => p.name === row.key) + 1; if (at > 0) test = (g) => c.part[g] === at; }
   else if (row.axis === "kind") { const bit = KIND_BIT[row.key] ?? 0; test = (g) => (c.kinds[g] & bit) !== 0; }
   else {
@@ -472,9 +474,13 @@ function cellsOfRow(row) {
 /** A row's cells in the layers drawn, less the hidden shell (a row's own shell kind still shows, and a hidden part,
  *  kind or type too: lighting it up is what the hover is for). */
 function shownCellsOfRow(row) {
-  const [lo, hi] = shownRange(), per = file.schem.perLayer, c = codedNow();
-  const sh = shellHiddenMask() & ~(row.axis === "kind" ? KIND_BIT[row.key] ?? 0 : 0), out = [];
-  for (const i of cellsOfRow(row)) { const y = Math.floor(i / per); if (y >= lo && y <= hi && !(c.kinds[c.groups[i]] & sh)) out.push(i); }
+  // a layer's cells are one run of indices; counted first, then copied, so a million cells are two typed-array passes
+  const [lo, hi] = shownRange(), per = file.schem.perLayer, c = codedNow(), all = cellsOfRow(row);
+  const sh = shellHiddenMask() & ~(row.axis === "kind" ? KIND_BIT[row.key] ?? 0 : 0), start = lo * per, end = (hi + 1) * per;
+  let n = 0;
+  for (let j = 0; j < all.length; j++) { const i = all[j]; if (i >= start && i < end && !(c.kinds[c.groups[i]] & sh)) n++; }
+  const out = new Int32Array(n);
+  for (let j = 0, o = 0; j < all.length; j++) { const i = all[j]; if (i >= start && i < end && !(c.kinds[c.groups[i]] & sh)) out[o++] = i; }
   return out;
 }
 // past this many blocks a row lights up every few of them (the terrain: a million boxes would stall the page)
@@ -484,8 +490,9 @@ function showGhost(row) {
   if (!row || !file) return;
   let cells = shownCellsOfRow(row);
   if (!cells.length) return;
-  if (cells.length > GHOST_MAX) { const step = Math.ceil(cells.length / GHOST_MAX); cells = cells.filter((_, j) => j % step === 0); }
-  ghost = cellsMesh(cells.map((i) => file.schem.cellOf(i)), ghostMat);
+  const step = Math.ceil(cells.length / GHOST_MAX), picked = [];
+  for (let j = 0; j < cells.length; j += step) picked.push(file.schem.cellOf(cells[j]));
+  ghost = cellsMesh(picked, ghostMat);
   markGroup.add(ghost); redraw();
 }
 /** A translucent box on each of `cells` (file coordinates), one instanced mesh: a part's ghost, a material's blocks. */
@@ -1333,8 +1340,11 @@ function revealPartRow(name) { $("partsGrp").open = true; const r = partRows.get
 // far enough to see the whole part. Returns the box flown to (file cells, inclusive), or null.
 function flyToRow(row) {
   let cells = shownCellsOfRow(row); if (!cells.length) cells = cellsOfRow(row); if (!cells.length) return null;
-  const s = file.schem, min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
-  for (const i of cells) { const c = s.cellOf(i); for (let a = 0; a < 3; a++) { if (c[a] < min[a]) min[a] = c[a]; if (c[a] > max[a]) max[a] = c[a]; } }
+  const W = file.schem.width, per = file.schem.perLayer, min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+  for (let j = 0; j < cells.length; j++) {
+    const i = cells[j], y = (i / per) | 0, r = i - y * per, z = (r / W) | 0, x = r - z * W;
+    if (x < min[0]) min[0] = x; if (x > max[0]) max[0] = x; if (y < min[1]) min[1] = y; if (y > max[1]) max[1] = y; if (z < min[2]) min[2] = z; if (z > max[2]) max[2] = z;
+  }
   return flyToBox(min, max) ? { min, max } : null;
 }
 const flyToPart = (name) => flyToRow({ axis: "part", key: name });
