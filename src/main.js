@@ -275,18 +275,31 @@ function hiddenGroupsNow() { const f = groupFlagsNow(), out = []; for (let g = 1
 const canShowNow = (so) => loaded.holds(file) && !!so?.showCells && !typesOutsideGroups();
 /** What is asked for now, as a key: the layers drawn and everything hidden (a load in flight tells a change by it). */
 const askedKey = () => `${layer.mode === "all" ? "all" : `${layer.lo}-${layer.hi}`}|${filterKey()}`;
-/** The renderer has the file its last load was for: a change made while it was on its way is shown now (the load
+/** The renderer has the file load `id` was for: a change made while it was on its way is shown now (the load
  *  carried what was asked for when it began). */
-function loadArrived() {
-  if (!loaded.arrived(askedKey())) return;
+function loadArrived(id) {
+  if (!loaded.arrived(id, askedKey())) return;
   const so = schematicObject();
   if (canShowNow(so)) so.showCells(rangeNow(), hiddenGroupsNow());
 }
+// Loads run one at a time, in the order asked: a load still being written when the next begins would otherwise land
+// after it, and the renderer would end with the older file. Each writes the file as it is asked for when its turn
+// comes. Resolves when the renderer has the file (its build still running); a failed load is reported and forgotten.
+let loadChain = Promise.resolve();
+function loadIntoRenderer() {
+  const run = loadChain.then(async () => {
+    const bytes = await renderBytes(), id = loaded.lastId;
+    try { await renderer.schematicManager.loadSchematic(SCHEM_ID, bytes, loadProps()); loadArrived(id); }
+    catch (e) { loaded.failed(); throw e; }
+  });
+  loadChain = run.catch(() => {});
+  return run;
+}
 /** The file as the renderer gets it now: all of it, or (not live) the hidden cells as air and the layer range. */
 function renderBytes() {
-  const cutNow = !loaded.live || typesOutsideGroups(), hidden = hiddenCells();
-  loaded.begin({ file, hidden, cut: cutNow, asked: askedKey() });
-  const cut = cutNow ? { hidden, ...(rangeNow() ?? {}) } : {};
+  const cutNow = !loaded.live || typesOutsideGroups();
+  loaded.begin({ file, cut: cutNow, asked: askedKey() });
+  const cut = cutNow ? { hidden: hiddenCells(), ...(rangeNow() ?? {}) } : {};
   return file.schem.render(cut).then((u8) => u8.buffer);
 }
 /** What the renderer takes with a file: the cell groups and what to show, when it can. */
@@ -669,7 +682,7 @@ async function startRenderer() {
           status(`${schemName} parsed, building meshes…`, "busy");
           // the renderer holds the file the load was for now
           // (the first load only: a later loadSchematic does not call this, its own resolving does: loadArrived)
-          loaded.arrived(askedKey());
+          loaded.arrived(null, askedKey());
           // a whole file: the renderer gets its cell groups, and draws what is asked for now from its first build
           const so = schematicObject();
           if (!so?.showCells || !so?.setCellGroups) loaded.live = loaded.canFilter = false;
@@ -716,7 +729,8 @@ let openSeq = 0, rendererStart = null;
 async function openFile(rec, opts = {}) {
   const mine = ++openSeq, current = () => mine === openSeq;
   let f;
-  try { f = await readFile(rec); } catch (e) { status(`${rec.name}: ${e.message}`, "err"); return; }
+  try { f = await readFile(rec); } catch (e) { if (current()) status(`${rec.name}: ${e.message}`, "err"); return; }
+  if (!current()) return;
   setFile(f, opts);
   if (!renderer) {
     if (!rendererStart) { rendererStart = startRenderer(); await rendererStart; return; }
@@ -1434,7 +1448,7 @@ async function reloadLayers(what) {
   unknown.clear();
   saveView();
   status(`reloading ${what}…`, "busy");
-  try { await renderer.schematicManager.loadSchematic(SCHEM_ID, await renderBytes(), loadProps()); loadArrived(); } catch (e) { loaded.failed(); status(e.message, "err"); }
+  try { await loadIntoRenderer(); } catch (e) { status(e.message, "err"); }
   restoreSoon();
 }
 /** After the renderer shows other cells of the file it has: what the page draws over them follows. */
@@ -1746,8 +1760,7 @@ async function loadBelow(y) {
   }
   unknown.clear();
   const rendered = new Promise((r) => { capture.rendered = r; });
-  await renderer.schematicManager.loadSchematic(SCHEM_ID, await renderBytes(), loadProps());
-  loadArrived();
+  try { await loadIntoRenderer(); } catch (e) { capture.rendered = null; status(e.message, "err"); return; }
   await Promise.race([rendered, sleep(60000)]);
   capture.rendered = null;
   await sleep(window.buildGif.settle);
