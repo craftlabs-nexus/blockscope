@@ -362,3 +362,19 @@ export function familiesOf(types) {
 /** Whether, of `count` types with those in `hidden` hidden, exactly `ids` are shown: what a type's or a family's solo
  *  means. Not when nothing is hidden: a file whose types are all one family shows only it, but nothing is soloed. */
 export const onlyThese = (hidden, count, ids) => hidden.size > 0 && hidden.size === count - ids.length && ids.every((id) => !hidden.has(id));
+
+/**
+ * A link's kinds (?kind=a,b picks them, ?hideKind=a,b hides them) for a file listing `listed`: `{ picking, only,
+ * hidden, shellOff }`. A kind the file does not list is left out (it would have no row to show it again); the shell's
+ * kinds are the shell toggles, so hiding one turns its toggle off, and picking one leaves the toggle as the link says.
+ */
+export function kindsFromLink(kind, hideKind, listed) {
+  const known = (k) => k in KIND_BIT && listed.includes(k), split = (v) => (v ?? "").split(",").filter(Boolean);
+  const shell = new Set(["roof", "wall", "floor"]);
+  return {
+    picking: kind !== null && kind !== undefined,
+    only: split(kind).filter(known),
+    hidden: split(hideKind).filter((k) => known(k) && !shell.has(k)),
+    shellOff: split(hideKind).filter((k) => shell.has(k)),
+  };
+}

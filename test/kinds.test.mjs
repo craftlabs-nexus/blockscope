@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { encodeNbt, gzip, encodeVarints } from "../src/nbt.js";
 import { Schematic } from "../src/schematic.js";
-import { classify, typesOf, onlyThese, familyOf, familiesOf, firstKinds, KIND_ORDER, codeGroups, HiddenCells, kindsOfId, kindsShown, kindsOfMask, KINDS, KIND_BIT, REDSTONE_REASONS, KINDS_MIN_BLOCKS, KINDS_MIN_SECOND } from "../src/kinds.js";
+import { classify, typesOf, onlyThese, kindsFromLink, familyOf, familiesOf, firstKinds, KIND_ORDER, codeGroups, HiddenCells, kindsOfId, kindsShown, kindsOfMask, KINDS, KIND_BIT, REDSTONE_REASONS, KINDS_MIN_BLOCKS, KINDS_MIN_SECOND } from "../src/kinds.js";
 
 const i32 = (v) => ({ t: 3, v }), i16 = (v) => ({ t: 2, v });
 
@@ -283,4 +283,11 @@ test("solo of a type or family: exactly those shown, and something hidden", () =
   assert.equal(onlyThese(new Set(), 2, wool), false, "a file all of one family: nothing soloed");
   assert.equal(onlyThese(new Set(["minecraft:stone"]), 3, wool), true);
   assert.equal(onlyThese(new Set(["minecraft:red_wool"]), 3, ["minecraft:stone"]), false);
+});
+
+test("a link's kinds: only those the file lists; a picked shell kind leaves the shell as the link says", () => {
+  const listed = ["terrain", "roof", "lighting"];
+  assert.deepEqual(kindsFromLink("roof", null, listed), { picking: true, only: ["roof"], hidden: [], shellOff: [] }, "the roof is not turned on");
+  assert.deepEqual(kindsFromLink(null, "terrain,trees,roof", listed), { picking: false, only: [], hidden: ["terrain"], shellOff: ["roof"] }, "trees has no row here");
+  assert.deepEqual(kindsFromLink("", null, listed), { picking: true, only: [], hidden: [], shellOff: [] }, "?kind= picks none");
 });

@@ -8,7 +8,7 @@ import { analyzeFolder, analyzePackZip, detectPackZip, fromFileList } from "@cra
 import { Schematic } from "./schematic.js";
 import { cornersOf, fillWithoutOffset, fitInto } from "./view.js";
 import { LoadState } from "./loadstate.js";
-import { classify, typesOf, familiesOf, onlyThese, firstKinds, codeGroups, HiddenCells, KINDS, KIND_BIT, KIND_ORDER, REDSTONE_REASONS, kindsOfMask } from "./kinds.js";
+import { classify, typesOf, familiesOf, onlyThese, kindsFromLink, firstKinds, codeGroups, HiddenCells, KINDS, KIND_BIT, KIND_ORDER, REDSTONE_REASONS, kindsOfMask } from "./kinds.js";
 import { partOf, partsOf } from "./parts.js";
 import { framedRealId } from "./framed.js";
 import { decoratedRealId, DYES } from "./decorated.js";
@@ -190,8 +190,8 @@ function setFile(f, { fromUrl = false } = {}) {
     if (params.get("part") !== null) { const keep = new Set(params.get("part").split(",")); for (const n of names) if (!keep.has(n)) hiddenPartSet.add(n); }
     if (params.get("hidePart") !== null) for (const n of params.get("hidePart").split(",")) if (names.includes(n)) hiddenPartSet.add(n);
     // kinds and types (the shell's kinds are the shell toggles: ?hideKind=roof is ?hide=roof)
-    if (params.get("kind") !== null) { picking = true; for (const k of params.get("kind").split(",")) if (k in KIND_BIT) { onlyKinds.add(k); if (k in shell) shell[k] = true; } }
-    for (const k of (params.get("hideKind") ?? "").split(",")) if (k in shell) shell[k] = false; else if (k in KIND_BIT) hiddenKinds.add(k);
+    const lk = kindsFromLink(params.get("kind"), params.get("hideKind"), blocks.kinds.shown ? blocks.kinds.listed : []);
+    picking = lk.picking; for (const k of lk.only) onlyKinds.add(k); for (const k of lk.hidden) hiddenKinds.add(k); for (const k of lk.shellOff) shell[k] = false;
     const ids = blocks.types.types.map((t) => t.id);
     if (params.get("type") !== null) { const keep = new Set(params.get("type").split(",").map(typeId)); for (const id of ids) if (!keep.has(id)) hiddenTypes.add(id); }
     for (const id of (params.get("hideType") ?? "").split(",").filter(Boolean).map(typeId)) if (ids.includes(id)) hiddenTypes.add(id);
@@ -1235,7 +1235,7 @@ function renderBlocks() {
   const filter = $("blockFilter").value.trim().toLowerCase();
   const kindsOff = showKinds ? k.listed.filter((x) => !kindShown(x)).length : 0;
   $("blocksSum").textContent = [showKinds && `${k.listed.length} kinds`, `${ty.length} types`, kindsOff + hiddenTypes.size && `${kindsOff + hiddenTypes.size} hidden`].filter(Boolean).join(" · ");
-  $("blocksAll").disabled = !kindsOff && !hiddenTypes.size && !picking;
+  $("blocksAll").disabled = !kindsOff && !hiddenKinds.size && !hiddenTypes.size && !picking;
   // kinds, most blocks first
   const kl = $("kinds"); kl.replaceChildren();
   $("kindsHead").style.display = kl.style.display = showKinds ? "" : "none";
