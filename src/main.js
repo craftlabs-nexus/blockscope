@@ -654,8 +654,51 @@ function centerOnDrawn() {
 function smartFit() {
   if (topView.on) { topFit(); setTimeout(() => { if (!userMoved && topView.on) topFit(); }, 150); return; }
   try { renderer?.cameraManager.focusOnSchematics(); } catch {}
-  centerOnDrawn(); faceFronts();
-  for (const t of [150, 600]) setTimeout(() => { if (!userMoved) { centerOnDrawn(); faceFronts(); } }, t);
+  const frame = () => { applyViewOffset(); centerOnDrawn(); faceFronts(); fitBeside(); };
+  frame();
+  for (const t of [150, 600]) setTimeout(() => { if (!userMoved) frame(); }, t);
+}
+// The panel floats over the left of the canvas. The view's middle is the middle of the area beside it: a view offset
+// moves the picture's center there without moving the camera, so the pivot, a fit and a turn all sit in what you can
+// see. None while the panel is folded, takes most of the width (a phone), or a picture is being taken.
+let bareView = 0;
+function freeLeft() {
+  const panel = $("hud");
+  if (bareView || capture.on || !panel || panel.classList.contains("collapsed")) return 0;
+  const c = canvas.getBoundingClientRect(), h = panel.getBoundingClientRect(), left = h.right + 10 - c.left;
+  return h.width && left > 0 && left < c.width * 0.5 ? left : 0;
+}
+function applyViewOffset() {
+  const cam = camera(); if (!cam?.setViewOffset) return;
+  const { width: W, height: H } = canvas.getBoundingClientRect(), shift = freeLeft() / 2, v = cam.view;
+  if (!shift || !W || !H) { if (v?.enabled) { cam.clearViewOffset(); redraw(); } return; }
+  if (v?.enabled && v.fullWidth === W && v.fullHeight === H && v.offsetX === -shift) return;
+  cam.setViewOffset(W, H, -shift, 0, W, H); redraw();
+}
+/** Where the view's middle is on the canvas, in normalized device coordinates (x; y is 0). */
+const viewCenterX = () => { const v = camera()?.view; return v?.enabled ? (-2 * v.offsetX) / v.fullWidth : 0; };
+// After the library's fit (which frames the model in the whole canvas): as far out again as it takes for the model to
+// fill the area beside the panel no more than the library filled the whole canvas.
+function fitBeside() {
+  const cam = camera(), ctl = controls(), v = cam?.view; if (!cam || !ctl?.target || !v?.enabled) return;
+  const box = drawnBox(); if (box.isEmpty()) return;
+  const corners = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => new THREE.Vector3(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z));
+  // how much of the area the box takes (1: edge to edge), across and up, with the view's middle at x0 and half its width hw
+  const fill = (x0, hw) => {
+    cam.updateMatrixWorld(); cam.updateProjectionMatrix();
+    let f = 0; for (const c of corners) { const p = c.clone().project(cam); f = Math.max(f, Math.abs(p.x - x0) / hw, Math.abs(p.y)); }
+    return f;
+  };
+  const view = { ...v };
+  cam.clearViewOffset(); const want = fill(0, 1);
+  cam.setViewOffset(view.fullWidth, view.fullHeight, view.offsetX, 0, view.width, view.height);
+  const x0 = viewCenterX(), hw = 1 - x0;
+  for (let i = 0; i < 4; i++) {
+    const k = fill(x0, hw) / want; if (!(k > 1.01)) break;
+    if (cam.isOrthographicCamera) cam.zoom /= k;
+    else cam.position.sub(ctl.target).multiplyScalar(k).add(ctl.target);
+  }
+  cam.updateProjectionMatrix(); ctl.update?.(); redraw();
 }
 const fitView = () => { stopMomentum(); userMoved = false; savedView.on = false; cancelRestores(); smartFit(); syncUrl(); };
 $("focus").onclick = fitView;
@@ -705,7 +748,7 @@ function cellOfHit(hit) {
 const ndcOf = (ev) => { const r = canvas.getBoundingClientRect(); return [((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1]; };
 function repivot() {
   const ctl = controls(), cam = camera(); if (!ctl?.target || !cam) return;
-  const hit = hitUnderPointer(0, 0);
+  const hit = hitUnderPointer(viewCenterX(), 0);
   if (hit) { ctl.target.copy(hit.point); ctl.update?.(); }
 }
 // While a button is held on the canvas no deferred view restore may snatch the camera away from the drag. The fly
@@ -790,6 +833,7 @@ let camStamp = "";
 requestAnimationFrame(function compass() {
   requestAnimationFrame(compass);
   const cam = camera(); if (!cam) return;
+  applyViewOffset();   // the panel folded or resized, the window resized, a camera switched
   stepTopTurn(); fadeGrid();
   const d = groundForward(cam);
   const heading = Math.atan2(d.x, -d.z); // 0 = looking north
@@ -1245,7 +1289,9 @@ function topFit(box = null) {
     const odd = topView.q % 2 === 1;   // east or west up: the file's x runs up the screen
     const w = Math.max(1, odd ? s.z : s.x), h = Math.max(1, odd ? s.x : s.z);
     ctl.target.x = c.x; ctl.target.z = c.z;
-    cam.zoom = Math.min((cam.right - cam.left) / (w * 1.1), (cam.top - cam.bottom) / (h * 1.1));
+    applyViewOffset();
+    const across = 1 - viewCenterX();   // the share of the width beside the panel
+    cam.zoom = Math.min(((cam.right - cam.left) * across) / (w * 1.1), (cam.top - cam.bottom) / (h * 1.1));
   }
   placeTop();
 }
@@ -1319,7 +1365,11 @@ function download(blob, name) {
 }
 const stem = () => schemName.replace(/\.[^.]+$/, "");
 /** A render of the view as a PNG Blob (also the console's and the test harness's way in). */
-const screenshot = (width = 1600, height = 1000) => renderer.takeScreenshot({ format: "image/png", width, height });
+// the canvas alone: the picture centered on the whole canvas, not beside the panel
+async function screenshot(width = 1600, height = 1000) {
+  bareView++; applyViewOffset();
+  try { return await renderer.takeScreenshot({ format: "image/png", width, height }); } finally { bareView--; applyViewOffset(); }
+}
 window.saveScreenshot = async (name = `${stem()}.png`, width = 1600, height = 1000) => { download(await screenshot(width, height), name); status(`saved ${name}`); };
 $("shot").onclick = () => saveScreenshot();
 // The build animation (Build): an animated GIF of the schematic going up a layer at a time from the bottom, each frame
