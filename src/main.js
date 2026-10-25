@@ -21,6 +21,7 @@ import { createMaterials } from "./materials/panel.js";
 import { esc } from "./html.js";
 import { prepareBook } from "./materials/engine.js";
 import { BOOK_FILE } from "./materials/book.js";
+import { stepTarget, filledLayers } from "./layers.js";
 
 const $ = (id) => document.getElementById(id);
 // Anything that breaks the page shows in the status line, not only in the console.
@@ -166,10 +167,26 @@ const capture = { on: false, stop: false, rendered: null, after: null };
 const topView = { on: false, q: 0, heading: 0, anim: null, prev: "perspective", saved: null, grid: true, wanted: null };
 try { topView.grid = localStorage.getItem("top.grid") !== "0"; } catch {}
 const simOn = params.get("sim") === "on";
-/** The file as the renderer gets it now: the layer range, the hidden shell and parts as air. */
+// What the renderer's file was built from: the file and the hidden cells (shell and parts as air). It holds every
+// layer, and the renderer draws the ones asked for (setLayerRange: no reload, a few tens of ms), so a change of
+// layers alone keeps the file; any other change loads it again. `live` is false where the renderer cannot (one
+// without setLayerRange, or a build without layer runs): the file then carries only the layers drawn, as before.
+const loaded = { file: null, hidden: null, live: true };
+const schematicObject = () => renderer?.schematicManager?.getSchematic?.(SCHEM_ID) ?? renderer?.schematicManager?.getFirstSchematic?.();
+/** The layers drawn as the renderer takes them (minY..maxY-1), null for all. */
+const rangeNow = () => (layer.mode === "all" ? null : { minY: layer.lo, maxY: layer.hi + 1 });
+/** The file as the renderer gets it now: the hidden shell and parts as air, and the layer range unless it draws that itself. */
 function renderBytes() {
-  const range = layer.mode === "all" ? {} : { minY: layer.lo, maxY: layer.hi + 1 };
-  return file.schem.render({ hidden: hiddenCells(), ...range }).then((u8) => u8.buffer);
+  loaded.file = file; loaded.hidden = hiddenCells();
+  const range = rangeNow() && !loaded.live ? rangeNow() : {};
+  return file.schem.render({ hidden: loaded.hidden, ...range }).then((u8) => u8.buffer);
+}
+// the layers that hold a block once the hidden shell and parts are air (the layer steps skip the rest)
+let filledCache = { file: null, hidden: null, ys: [] };
+function filledNow() {
+  const hidden = hiddenCells();
+  if (filledCache.file !== file || filledCache.hidden !== hidden) filledCache = { file, hidden, ys: filledLayers(file.schem.layerCounts(hidden)) };
+  return filledCache.ys;
 }
 const worldY = (y) => info.offset[1] + y;
 const topLayer = () => (roofOff() ? info.height - 2 : info.height - 1);
@@ -483,8 +500,18 @@ async function startRenderer() {
       cameraOptions: { position: [30, 25, 40], useTightBounds: true },
       callbacks: {
         onResourcePackLoaded: () => status("pack loaded, meshing…", "busy"),
-        onSchematicLoaded: () => status(`${schemName} parsed, building meshes…`, "busy"),
+        onSchematicLoaded: () => {
+          status(`${schemName} parsed, building meshes…`, "busy");
+          // the first file holds every layer: the renderer draws the layers a link asks for from its first build
+          const so = schematicObject();
+          if (!so?.setLayerRange) loaded.live = false;
+          else if (rangeNow()) so.setLayerRange(rangeNow());
+        },
         onSchematicRendered: () => {
+          // a build that cannot draw a range of layers (or a renderer without it) while one is asked for: the file
+          // is loaded again with only those layers
+          const so = schematicObject();
+          if (loaded.live && rangeNow() && !(so?.canShowLayerRange?.() ?? false)) { loaded.live = false; reloadLayers("the layers"); return; }
           status(capture.after ?? `rendered ${schemName}${source.none && wantedNamespaces(file.schem).length ? ": it lists no mods, so its modded blocks need your own pack (File, Resource pack)" : ""}`); capture.after = null; pinGroup(); renderUnknown(); buildOverlayPaintings(); tuneControls(); keepBackground();
           settleSoon();
           attachMarks(); placeBox("pin", pinned.cell);
@@ -576,7 +603,7 @@ function faceFronts() {
 // off-center), the camera moved along.
 function centerOnDrawn() {
   const cam = camera(), ctl = controls(); if (!cam || !ctl?.target) return;
-  const box = new THREE.Box3(); for (const m of schematicMeshes()) box.expandByObject(m);
+  const box = drawnBox();
   if (box.isEmpty()) return;
   const d = box.getCenter(new THREE.Vector3()).sub(ctl.target);
   ctl.target.add(d); cam.position.add(d); ctl.update?.(); redraw();
@@ -600,7 +627,18 @@ const camText = () => { const cam = camera(), ctl = controls(); if (!cam || !ctl
 // click puts the pivot on that block, and before every drag the pivot moves to the first block under the screen
 // center (kept at the same distance if nothing is there), so a drag always turns around what is in front of you.
 const inMarks = (o) => { for (let p = o; p; p = p.parent) if (p === markGroup) return true; return false; };
-const schematicMeshes = () => { const g = group(); const out = []; g?.traverse((o) => { if (o.isMesh && o.visible && !inMarks(o)) out.push(o); }); return out; };
+const schematicMeshes = () => { const g = group(); const out = []; g?.traverseVisible((o) => { if (o.isMesh && !inMarks(o)) out.push(o); }); return out; };
+// the box of what is drawn (world): the meshes' boxes, cut to the layers drawn when the renderer holds them all
+function drawnBox() {
+  const box = new THREE.Box3(); for (const m of schematicMeshes()) box.expandByObject(m);
+  const g = group(), r = rangeNow();
+  if (!box.isEmpty() && g && r && loaded.live) {
+    box.min.y = Math.max(box.min.y, g.localToWorld(new THREE.Vector3(0, r.minY - 0.5, 0)).y);
+    box.max.y = Math.min(box.max.y, g.localToWorld(new THREE.Vector3(0, r.maxY - 0.5, 0)).y);
+    if (box.min.y > box.max.y) box.makeEmpty();
+  }
+  return box;
+}
 function hitUnderPointer(ndcX, ndcY) {
   const cam = camera(); if (!cam) return null;
   const rc = new THREE.Raycaster(); rc.setFromCamera(new THREE.Vector2(ndcX, ndcY), cam);
@@ -950,15 +988,30 @@ function restoreView() {
 }
 // now, and again after the renderer's own deferred fit
 function restoreSoon() { restoreView(); cancelRestores(); restoreTimers = [setTimeout(restoreView, 100), setTimeout(restoreView, 500)]; }
+/** Shows the layers, parts and shell asked for now: only the layers changed, the renderer draws others of the file it
+ *  has; else the file is loaded again (the camera kept). */
 async function reloadLayers(what) {
   if (!renderer?.schematicManager || !file) return; // not before the renderer has set itself up
   applyLayers();
+  hideGhost(); showMatCells(null);
+  const so = schematicObject();
+  if (loaded.live && so?.setLayerRange && loaded.file === file && loaded.hidden === hiddenCells()) {
+    if (await so.setLayerRange(rangeNow())) { layersShown(); return; }
+    loaded.live = false;   // this build cannot draw a range: the file is loaded with only those layers
+  }
   unknown.clear();
   saveView();
-  hideGhost(); showMatCells(null);
   status(`reloading ${what}…`, "busy");
-  try { await renderer.schematicManager.loadSchematic(SCHEM_ID, await renderBytes()); } catch (e) { status(e.message, "err"); }
+  try { await renderer.schematicManager.loadSchematic(SCHEM_ID, await renderBytes(), { layerRange: loaded.live ? rangeNow() : null }); } catch (e) { status(e.message, "err"); }
   restoreSoon();
+}
+/** After the renderer shows other layers of the file it has: what the page draws over them follows. */
+function layersShown() {
+  status(capture.after ?? `rendered ${schemName}`); capture.after = null;
+  buildOverlayPaintings(); updateGrid();
+  if (topView.on) placeTop();
+  if (layer.mode === "above" && layer.wantBottomUp) { layer.wantBottomUp = false; lookFromBelow(); }
+  syncUrl(); redraw(); settleSoon();
 }
 for (const p of Object.keys(shell)) $(`shell-${p}`).onclick = () => {
   shell[p] = !shell[p];
@@ -972,7 +1025,13 @@ $("layerSingle").onclick = () => setMode("single");
 $("layerBelow").onclick = () => setMode("below");
 $("layerAbove").onclick = () => setMode("above");
 $("layerAll").onclick = () => setMode("all");
-const stepLayer = (d) => { if (layer.mode === "all") { layer.mode = "below"; layer.cur = topLayer(); } layer.cur += d; reloadLayers(`layer ${layer.cur}`); };
+// A step goes to the nearest layer that changes the view (layers.js): layers with no block shown are passed over.
+const stepLayer = (d) => {
+  const mode = layer.mode === "all" ? "below" : layer.mode, cur = layer.mode === "all" ? topLayer() : layer.cur;
+  const to = stepTarget(mode, Math.min(cur, topLayer()), d, filledNow().filter((y) => y <= topLayer()));
+  if (to === null) { status(`no layer ${d < 0 ? "below" : "above"} changes the view`); return; }
+  layer.mode = mode; layer.cur = to; reloadLayers(`layer ${to}`);
+};
 $("layerDown").onclick = () => stepLayer(-1);
 $("layerUp").onclick = () => stepLayer(1);
 {
@@ -1138,7 +1197,7 @@ function placeTop() {
 // Centers the plan on `box` (world; the drawn blocks by default) and zooms so its footprint fills the view.
 function topFit(box = null) {
   const cam = camera(), ctl = controls(); if (!cam || !ctl?.target || !topView.on) return;
-  if (!box) { box = new THREE.Box3(); for (const m of schematicMeshes()) box.expandByObject(m); }
+  if (!box) box = drawnBox();
   if (!box.isEmpty()) {
     const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3());
     const odd = topView.q % 2 === 1;   // east or west up: the file's x runs up the screen
@@ -1230,11 +1289,21 @@ $("shot").onclick = () => saveScreenshot();
 // in ms, the longer side in pixels, margin, settle: how long the paintings get after each load).
 window.buildGif = { delay: 350, hold: 2500, size: 1200, margin: 0.02, settle: 700, download: true };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-// the vertices drawn now (the schematic and the page's overlays, not the marks): a layer that leaves it unchanged
-// drew nothing new
-const drawnVertices = () => { let n = 0; group()?.traverse((o) => { if (o.isMesh && o.visible && !inMarks(o)) n += (o.geometry?.attributes?.position?.count ?? 0) * (o.isInstancedMesh ? o.count : 1); }); return n; };
+// how much is drawn now (the schematic and the page's overlays, not the marks): a layer that leaves it unchanged drew
+// nothing new. A mesh drawn in groups counts the indices its groups take (the renderer draws a range of layers by
+// pointing them at it), any other its vertices.
+const drawnAmount = (g) => (g?.groups?.length && g.index ? g.groups.reduce((n, gr) => n + gr.count, 0) : (g?.attributes?.position?.count ?? 0));
+const drawnVertices = () => { let n = 0; group()?.traverseVisible((o) => { if (o.isMesh && !inMarks(o)) n += drawnAmount(o.geometry) * (o.isInstancedMesh ? o.count : 1); }); return n; };
 async function loadBelow(y) {
-  layer.mode = "below"; layer.cur = y; applyLayers(); unknown.clear();
+  layer.mode = "below"; layer.cur = y; applyLayers();
+  // the renderer draws the layers of the file it has: no reload, only the paintings to place again
+  const so = schematicObject();
+  if (loaded.live && so?.setLayerRange && loaded.file === file && loaded.hidden === hiddenCells() && (await so.setLayerRange(rangeNow()))) {
+    buildOverlayPaintings();
+    await sleep(Math.min(window.buildGif.settle, 120));
+    return;
+  }
+  unknown.clear();
   const rendered = new Promise((r) => { capture.rendered = r; });
   await renderer.schematicManager.loadSchematic(SCHEM_ID, await renderBytes());
   await Promise.race([rendered, sleep(60000)]);

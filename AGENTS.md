@@ -97,5 +97,5 @@ For example, one part alone, framed: `?agent=1&schem=<file>&part=<part>&focus=<p
   `node_modules/.vite*/deps/…` means Vite's dependency cache moved under the server: restart `npm run dev:local` (or
   `npm run dev`).
 - **`ready()` times out**: a first download on a slow line (raise the timeout), or the pack failed (the status line).
-- **The camera is not where you put it**: something reloaded the file after you moved it (a parts or layers change);
-  wait for `nextRender()` (or use `focusPart`, which waits itself), then move it.
+- **The camera is not where you put it**: something reloaded the file after you moved it (a parts or shell change; a
+  layers change draws without a reload); wait for `nextRender()` (or use `focusPart`, which waits itself), then move it.

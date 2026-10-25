@@ -42,7 +42,9 @@ one for the Roof toggle and one for Inspect.
   beside itself), else a Litematica file's regions as its parts. The Parts group's tooltip says which.
 - **The view.** View (fit to the fronts, perspective, isometric or top: a flat plan straight down, every block the
   same size, drag pans, Q / E turn it a quarter, a block grid; Shot, Build, the shell toggles), Layers (all,
-  single, below, above, a slider), Parts (from the metadata or a Litematica file's regions: hover to light one up,
+  single, below, above, a slider; PageUp / PageDown or [ ] step to the next layer that changes the view, passing
+  over layers with nothing shown, and a layer change draws at once: the renderer holds every layer and draws the
+  range, so only a change of parts or shell loads the file again), Parts (from the metadata or a Litematica file's regions: hover to light one up,
   hide, solo, fly to it), Block (click to pin: id, state, position, a sign's text, a painting, the metadata), Redstone
   (signal digits: [Redstone Tweaks](https://modrinth.com/resourcepack/redstonetweaksresourcepack), MIT, fetched from
   Modrinth once and added on top of the pack, showing dust strength, repeater delays and comparator modes; `?sim=on`:
@@ -193,6 +195,7 @@ publishes them is not part of this repository.
 |---|---|
 | `index.html`, `src/main.js` | the page |
 | `src/schematic.js`, `src/nbt.js` | the schematic in memory: NBT in the browser, info, shell, parts, signs, layer counts, the file the renderer gets |
+| `src/layers.js` | where a layer step lands: the nearest layer that changes what is drawn |
 | `src/formats.js` | Litematica and structure files turned into Sponge ones, and the block metadata, mod list and description a file carries |
 | `src/parts.js`, `src/framed.js`, `src/decorated.js` | the plan's parts and shell from its metadata; framed drawers' ids per material set; patterned banners' and sherd pots' ids per design |
 | `src/plans.js` | plan files: the schematic, its metadata and paintings |
