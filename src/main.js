@@ -7,6 +7,7 @@ import JSZip from "jszip";
 import { analyzeFolder, analyzePackZip, detectPackZip, fromFileList } from "@craftlabs/packrat";
 import { Schematic } from "./schematic.js";
 import { cornersOf, fillWithoutOffset, fitInto } from "./view.js";
+import { LoadState } from "./loadstate.js";
 import { classify, typesOf, familiesOf, firstKinds, codeGroups, HiddenCells, KINDS, KIND_BIT, KIND_ORDER, REDSTONE_REASONS, kindsOfMask } from "./kinds.js";
 import { partOf, partsOf } from "./parts.js";
 import { framedRealId } from "./framed.js";
@@ -152,7 +153,7 @@ function setFile(f, { fromUrl = false } = {}) {
   file = f; schemName = f.name;
   pinned.cell = null;   // the last file's pin (a link's ?at= pins in the new one once it is drawn)
   // the last file's build may not have shown layers (an instanced or greedy build); this one gets its chance
-  loaded.live = loaded.canFilter;
+  loaded.newFile();
   const own = f.schem.metaSource === "file" ? f.schem.meta : null;
   meta = own ?? f.schem.meta ?? null;
   metaFrom = own ? "the file's own metadata" : f.schem.metaSource === "regions" ? "the Litematica file's regions" : "";
@@ -252,10 +253,8 @@ const simOn = params.get("sim") === "on";
 // and draws the layers and groups asked for (showCells: no reload, a few ms to a few tens), so a change of layers,
 // parts or shell keeps the file; only another file loads. `live` is false where the renderer cannot (one without
 // showCells, or a build without layer runs): the file it gets then carries only what is drawn, the rest as air.
-// cut: the file the renderer has leaves out what is hidden; pending: a load on its way (the renderer still holds the
-// last file until it is in); canFilter: false once the renderer is found to have no showCells (an older one), so a
-// file is then loaded cut from the start
-const loaded = { file: null, hidden: null, live: true, cut: false, pending: null, canFilter: true };
+// what the renderer holds of the file, and a load on its way (loadstate.js)
+const loaded = new LoadState();
 const schematicObject = () => renderer?.schematicManager?.getSchematic?.(SCHEM_ID) ?? renderer?.schematicManager?.getFirstSchematic?.();
 /** The layers drawn as the renderer takes them (minY..maxY-1), null for all. */
 const rangeNow = () => (layer.mode === "all" ? null : { minY: layer.lo, maxY: layer.hi + 1 });
@@ -273,11 +272,20 @@ const cellGroupsNow = () => codedNow().groups;
 /** The cell groups hidden now. */
 function hiddenGroupsNow() { const f = groupFlagsNow(), out = []; for (let g = 1; g < f.length; g++) if (f[g]) out.push(g); return out; }
 /** Whether the renderer can show what is asked for from the file it holds. */
-const canShowNow = (so) => loaded.live && !loaded.cut && !!so?.showCells && loaded.file === file && !typesOutsideGroups();
+const canShowNow = (so) => loaded.holds(file) && !!so?.showCells && !typesOutsideGroups();
+/** What is asked for now, as a key: the layers drawn and everything hidden (a load in flight tells a change by it). */
+const askedKey = () => `${layer.mode === "all" ? "all" : `${layer.lo}-${layer.hi}`}|${filterKey()}`;
+/** The renderer has the file its last load was for: a change made while it was on its way is shown now (the load
+ *  carried what was asked for when it began). */
+function loadArrived() {
+  if (!loaded.arrived(askedKey())) return;
+  const so = schematicObject();
+  if (canShowNow(so)) so.showCells(rangeNow(), hiddenGroupsNow());
+}
 /** The file as the renderer gets it now: all of it, or (not live) the hidden cells as air and the layer range. */
 function renderBytes() {
   const cutNow = !loaded.live || typesOutsideGroups(), hidden = hiddenCells();
-  loaded.pending = { file, hidden, cut: cutNow };
+  loaded.begin({ file, hidden, cut: cutNow, asked: askedKey() });
   const cut = cutNow ? { hidden, ...(rangeNow() ?? {}) } : {};
   return file.schem.render(cut).then((u8) => u8.buffer);
 }
@@ -660,7 +668,8 @@ async function startRenderer() {
         onSchematicLoaded: () => {
           status(`${schemName} parsed, building meshes…`, "busy");
           // the renderer holds the file the load was for now
-          if (loaded.pending) { Object.assign(loaded, { file: loaded.pending.file, hidden: loaded.pending.hidden, cut: loaded.pending.cut }); loaded.pending = null; }
+          // (the first load only: a later loadSchematic does not call this, its own resolving does: loadArrived)
+          loaded.arrived(askedKey());
           // a whole file: the renderer gets its cell groups, and draws what is asked for now from its first build
           const so = schematicObject();
           if (!so?.showCells || !so?.setCellGroups) loaded.live = loaded.canFilter = false;
@@ -1396,7 +1405,7 @@ async function reloadLayers(what) {
   hideGhost(); showMatCells(null);
   const so = schematicObject();
   // a whole file of this one on its way: the renderer shows what is asked for once it is in (onSchematicLoaded)
-  if (loaded.pending?.file === file && !loaded.pending.cut && loaded.live && !typesOutsideGroups()) return;
+  if (loaded.coming(file) && !typesOutsideGroups()) return;
   if (canShowNow(so)) {
     if (await so.showCells(rangeNow(), hiddenGroupsNow())) { layersShown(); return; }
     loaded.live = false;   // this build cannot: the file is loaded with only what is drawn
@@ -1404,7 +1413,7 @@ async function reloadLayers(what) {
   unknown.clear();
   saveView();
   status(`reloading ${what}…`, "busy");
-  try { await renderer.schematicManager.loadSchematic(SCHEM_ID, await renderBytes(), loadProps()); } catch (e) { loaded.pending = null; status(e.message, "err"); }
+  try { await renderer.schematicManager.loadSchematic(SCHEM_ID, await renderBytes(), loadProps()); loadArrived(); } catch (e) { loaded.failed(); status(e.message, "err"); }
   restoreSoon();
 }
 /** After the renderer shows other cells of the file it has: what the page draws over them follows. */
@@ -1715,6 +1724,7 @@ async function loadBelow(y) {
   unknown.clear();
   const rendered = new Promise((r) => { capture.rendered = r; });
   await renderer.schematicManager.loadSchematic(SCHEM_ID, await renderBytes(), loadProps());
+  loadArrived();
   await Promise.race([rendered, sleep(60000)]);
   capture.rendered = null;
   await sleep(window.buildGif.settle);
