@@ -206,3 +206,12 @@ test("cell groups past every limit: one group, nothing broken", async () => {
   const k = classify(s), t = typesOf(s), c = codeGroups(s, new Uint16Array([1, 2]), k.mask, t.ofPalette, 1);
   assert.deepEqual([c.size, c.typed, [...c.groups]], [1, false, [0, 0]]);
 });
+
+test("the metadata's own kinds, over a box of its own", async () => {
+  const s = await build(2, 1, 1, { "0,0,0": "minecraft:oak_planks", "1,0,0": "minecraft:oak_planks" });
+  const { BlockMeta } = await import("../src/blockmeta.js");
+  // one cell wider than the file, starting a cell to the west: the file's cells are the box's second and third
+  const meta = new BlockMeta([-1, 0, 0], [3, 1, 1], new Uint32Array([0, 1, 0]), [{ kind: "lighting", part: "a" }]);
+  const k = classify(s, { meta });
+  assert.deepEqual([kindsAt(s, k, 0, 0, 0), kindsAt(s, k, 1, 0, 0)], [["lighting"], []]);
+});

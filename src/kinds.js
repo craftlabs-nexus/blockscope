@@ -169,9 +169,14 @@ export function classify(schem, { shellCells = new Map(), meta = null } = {}) {
 
   // the shell, and kinds the metadata names
   for (const [i, role] of shellCells) if (KIND_BIT[role]) mask[i] |= KIND_BIT[role];
-  if (meta?.alignedWith?.(schem.offset, [schem.width, schem.height, schem.length])) {
-    const extra = meta.mapRecords((m) => [m?.kind ?? []].flat().reduce((a, k) => a | (KIND_BIT[k] ?? 0), 0));
-    if (extra.some(Boolean)) for (let i = 0; i < n; i++) { const r = meta.cells[i]; if (r && extra[r - 1]) mask[i] |= extra[r - 1]; }
+  // (over the file's cells, whatever box the metadata covers: a record's kinds worked out once)
+  if (meta?.records?.some((m) => m?.kind)) {
+    const recordAt = schem.recordReader(meta), bits = new Map();
+    for (let i = 0; i < n; i++) {
+      const m = recordAt(i); if (!m?.kind) continue;
+      let b = bits.get(m); if (b === undefined) bits.set(m, (b = [m.kind].flat().reduce((a, k) => a | (KIND_BIT[k] ?? 0), 0)));
+      mask[i] |= b;
+    }
   }
 
   const counts = new Array(KINDS.length).fill(0);
