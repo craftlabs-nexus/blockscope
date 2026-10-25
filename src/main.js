@@ -597,7 +597,6 @@ function stopMomentum() {
 // library's fit distance and height and swings round to that side, turned 25° off square so the build still reads
 // as 3D; no clear side (a room whose two walls face each other) keeps the library's own view. Worked out once per
 // file and set of hidden parts (soloing the drawer wall faces its fronts).
-const FRONT_WEIGHTS = [[/_drawers_|blockscope:framed_(?!trim)|:controller$/, 2], [/chest|barrel|furnace|smoker/, 1], [/wall_sign/, 0.5]];
 const FACE_DIR = { north: [0, -1], south: [0, 1], east: [1, 0], west: [-1, 0] };
 const OPPOSITE = { north: "south", south: "north", east: "west", west: "east" };
 let frontCache = { name: null, dir: null };
@@ -607,29 +606,13 @@ function frontDirection() {
   if (frontCache.name === cacheKey) return frontCache.dir;
   let dir = null;
   try {
-    const w = renderer.schematicManager.getFirstSchematic().getSchematicWrapper();
-    // the box of the blocks drawn (the layers drawn, the hidden shell and parts left out), from the page's own copy
-    const s = file.schem, hidden = hiddenCells(), min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
-    for (let i = lo * s.perLayer; i < (hi + 1) * s.perLayer && i < s.data.length; i++) {
-      if (s.air.has(s.data[i]) || hidden.has(i)) continue;
-      const c = s.cellOf(i); for (let a = 0; a < 3; a++) { if (c[a] < min[a]) min[a] = c[a]; if (c[a] > max[a]) max[a] = c[a]; }
-    }
-    const [x0, y0, z0] = min, [x1, y1, z1] = max;
-    if (x0 <= x1 && (x1 - x0 + 1) * (y1 - y0 + 1) * (z1 - z0 + 1) <= 400000) {   // a cell at a time through the wasm wrapper: rooms yes, huge files no
-      const net = { north: 0, south: 0, east: 0, west: 0 };
-      for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) {
-        if (hidden.has(s.index(x, y, z))) continue;   // the renderer holds the hidden cells too
-        const b = w.get_block_with_properties(x, y, z); if (!b) continue;
-        const name = b.name(), weight = FRONT_WEIGHTS.find(([re]) => re.test(name))?.[1];
-        const f = weight && b.properties().facing;
-        if (f in net) net[f] += weight;
-      }
-      const best = Object.keys(net).map((d) => [d, net[d] - net[OPPOSITE[d]]]).sort((a, b) => b[1] - a[1])[0];
-      // clear: the side has at least twice the fronts of the side opposite it, and most of the fronts that do not
-      // cancel (the hall: drawers north against a few south, its aisles' east and west chests cancelling)
-      const unpaired = Math.abs(net.north - net.south) + Math.abs(net.east - net.west);
-      if (best[1] >= 2 && net[best[0]] >= 2 * net[OPPOSITE[best[0]]] && best[1] >= 0.6 * unpaired) dir = best[0];
-    }
+    // the fronts among the blocks drawn (the layers drawn, the hidden shell and parts left out), from the page's copy
+    const net = file.schem.fronts(lo, hi, hiddenCells());
+    const best = Object.keys(net).map((d) => [d, net[d] - net[OPPOSITE[d]]]).sort((a, b) => b[1] - a[1])[0];
+    // clear: the side has at least twice the fronts of the side opposite it, and most of the fronts that do not
+    // cancel (the hall: drawers north against a few south, its aisles' east and west chests cancelling)
+    const unpaired = Math.abs(net.north - net.south) + Math.abs(net.east - net.west);
+    if (best[1] >= 2 && net[best[0]] >= 2 * net[OPPOSITE[best[0]]] && best[1] >= 0.6 * unpaired) dir = best[0];
   } catch (e) { console.warn("[blockscope] could not read the fronts for Fit", e); }
   frontCache = { name: cacheKey, dir };
   return dir;

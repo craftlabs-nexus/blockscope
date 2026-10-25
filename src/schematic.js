@@ -41,6 +41,9 @@ async function toSponge(bytes) {
 /** The shell roles in the order of their cell group numbers (cellGroups): roof 1, wall 2, floor 3. */
 export const SHELL_ROLES = ["roof", "wall", "floor"];
 
+// the blocks whose `facing` is their front (Fit turns to them), and how much each counts
+const FRONT_WEIGHTS = [[/_drawers_|blockscope:framed_(?!trim)|:controller$/, 2], [/chest|barrel|furnace|smoker/, 1], [/wall_sign/, 0.5]];
+
 export class Schematic {
   /** Reads a schematic from its bytes, whatever its name says: its contents decide the format. */
   static async load(bytes, name) {
@@ -170,6 +173,23 @@ export class Schematic {
     const out = new Array(this.height).fill(0);
     for (let i = 0; i < this.data.length && i < this.perLayer * this.height; i++) if (!this.air.has(this.data[i]) && !hidden.has(i)) out[Math.floor(i / this.perLayer)]++;
     return out;
+  }
+
+  /**
+   * Which way the fronts face among the blocks of layers `lo` to `hi` not in `hidden` (Fit turns to them): each
+   * `facing` of a chest, barrel, furnace or smoker counted once, a drawer's or framed block's twice (its face is its
+   * whole point), a wall sign's half. One pass over the cells, the weight and facing worked out once per palette entry.
+   */
+  fronts(lo, hi, hidden = new Set()) {
+    const net = { north: 0, south: 0, east: 0, west: 0 };
+    const weight = new Float64Array(this.keys.length), facing = new Array(this.keys.length);
+    this.keys.forEach((k, p) => {
+      const w = k ? FRONT_WEIGHTS.find(([re]) => re.test(baseId(k)))?.[1] : 0, f = w && /[[,]facing=(\w+)/.exec(k)?.[1];
+      if (f in net) { weight[p] = w; facing[p] = f; }
+    });
+    const end = Math.min((hi + 1) * this.perLayer, this.data.length);
+    for (let i = Math.max(0, lo * this.perLayer); i < end; i++) { const p = this.data[i]; if (weight[p] && !hidden.has(i)) net[facing[p]] += weight[p]; }
+    return net;
   }
 
   /** Every framed material set the file uses: [{ id, kind, side, trim, front }]. */

@@ -204,3 +204,11 @@ test("block metadata kept a record a cell: by world position and by a file's cel
   assert.ok(meta.alignedWith([5, 60, 7], [2, 1, 2]));
   assert.deepEqual(partsOf(meta).map((p) => [p.name, p.count]), [["a", 1], ["room shell", 2]]);
 });
+
+test("fronts: the facing of drawers, chests and wall signs among the layers drawn, the hidden cells left out", async () => {
+  const s = await Schematic.load(await gzip(encodeNbt(sample())), "t.schem");
+  // the drawer faces north (counts 2), the wall sign south (counts half), both on layer 1
+  assert.deepEqual(s.fronts(0, 3), { north: 2, south: 0.5, east: 0, west: 0 });
+  assert.deepEqual(s.fronts(2, 3), { north: 0, south: 0, east: 0, west: 0 });
+  assert.deepEqual(s.fronts(0, 3, new Set([s.index(0, 1, 0)])), { north: 0, south: 0.5, east: 0, west: 0 });
+});
