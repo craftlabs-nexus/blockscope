@@ -214,3 +214,13 @@ test("fronts: the facing of drawers, chests and wall signs among the layers draw
   assert.deepEqual(s.fronts(2, 3), { north: 0, south: 0, east: 0, west: 0 });
   assert.deepEqual(s.fronts(0, 3, new Set([s.index(0, 1, 0)])), { north: 0, south: 0.5, east: 0, west: 0 });
 });
+
+test("metadata over a box of its own: read by world position, its parts counted inside the file only", async () => {
+  const { BlockMeta } = await import("../src/blockmeta.js");
+  const s = await Schematic.load(await gzip(encodeNbt(sample())), "t.schem");   // 3 × 4 × 2 at (10, 64, -5)
+  // a 4 × 1 × 1 box from (9, 64, -5): its first cell lies outside the file, the other three in it
+  const meta = new BlockMeta([9, 64, -5], [4, 1, 1], new Uint32Array([1, 2, 2, 2]), [{ part: "outside" }, { part: "inside" }]);
+  assert.equal(s.metaAtIndex(meta, s.index(0, 0, 0)).part, "inside");
+  assert.equal(s.metaAtIndex(meta, s.index(0, 1, 0)), null);
+  assert.deepEqual(partsOf(meta, null, { origin: s.offset, size: [s.width, s.height, s.length] }).map((p) => [p.name, p.count]), [["inside", 3]]);
+});

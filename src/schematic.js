@@ -126,7 +126,9 @@ export class Schematic {
   /** The metadata record of cell `i` (a BlockMeta over this file's box is read by index, without a position). */
   metaAtIndex(meta, i) {
     if (meta instanceof BlockMeta && meta.alignedWith(this.offset, [this.width, this.height, this.length])) return meta.recordAt(i);
-    const [x, y, z] = this.cellOf(i); return this.metaAt(meta, x, y, z);
+    // a box of its own: by world position, worked out without an array a cell (scans call this for every cell)
+    const W = this.width, per = this.perLayer, y = (i / per) | 0, r = i - y * per, z = (r / W) | 0, x = r - z * W;
+    return meta?.at(x + this.offset[0], y + this.offset[1], z + this.offset[2]) ?? null;
   }
 
   /** Every shell cell: Map of block index -> part, how many cells each part has, and the share of the footprint the

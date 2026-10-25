@@ -24,11 +24,20 @@ const rank = (n) => LAST[n] ?? (n.startsWith("satellite: ") ? 4.5 : 0);   // the
 const partSort = (a, b) => rank(a) - rank(b) || a.localeCompare(b);
 
 /** Every part of the block metadata (a BlockMeta) with its block count, in display order: the file's own order when
- *  it gives one (`order`, BlockInfo Parts), any part it does not name after those; else the order above. */
-export function partsOf(meta, order = null) {
+ *  it gives one (`order`, BlockInfo Parts), any part it does not name after those; else the order above. `box`
+ *  ({ origin, size }, a file's): only the cells in it count, for metadata over a box of its own. */
+export function partsOf(meta, order = null, box = null) {
   // each record's part once, then the cells counted by record
   const counts = new Map(), perRecord = new Uint32Array(meta.records.length + 1);
-  for (let i = 0; i < meta.cells.length; i++) perRecord[meta.cells[i]]++;
+  if (!box || meta.alignedWith(box.origin, box.size)) for (let i = 0; i < meta.cells.length; i++) perRecord[meta.cells[i]]++;
+  else {
+    const [W, , L] = meta.size, per = W * L, lo = box.origin.map((v, a) => v - meta.origin[a]), hi = lo.map((v, a) => v + box.size[a]);
+    for (let i = 0; i < meta.cells.length; i++) {
+      const rec = meta.cells[i]; if (!rec) continue;
+      const y = (i / per) | 0, r = i - y * per, z = (r / W) | 0, x = r - z * W;
+      if (x >= lo[0] && x < hi[0] && y >= lo[1] && y < hi[1] && z >= lo[2] && z < hi[2]) perRecord[rec]++;
+    }
+  }
   meta.records.forEach((m, r) => { const p = partOf(m); if (p && perRecord[r + 1]) counts.set(p, (counts.get(p) ?? 0) + perRecord[r + 1]); });
   const at = new Map((order ?? []).map((n, i) => [n, i])), pos = (n) => at.get(n) ?? Infinity;
   return [...counts].sort(([a], [b]) => (order ? pos(a) - pos(b) || 0 : 0) || partSort(a, b)).map(([name, count]) => ({ name, count }));

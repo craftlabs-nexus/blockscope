@@ -168,7 +168,7 @@ function setFile(f, { fromUrl = false } = {}) {
   showDownloads(f);
   const s = f.schem, { counts, parts, roofCover } = s.shellOf(meta);
   shellCells = parts; rowCells.clear(); frontCache = { name: null, dir: null };
-  Object.assign(info, s.info(), { shell: counts, roofCover, meta: meta !== null, parts: meta ? partsOf(meta, own ? s.partOrder : null) : [] });
+  Object.assign(info, s.info(), { shell: counts, roofCover, meta: meta !== null, parts: meta ? partsOf(meta, own ? s.partOrder : null, { origin: s.offset, size: [s.width, s.height, s.length] }) : [] });
   blocks = { kinds: classify(s, { shellCells, meta }), types: typesOf(s) };
   blocks.families = familiesOf(blocks.types.types);
   blocks.familyOf = new Map(blocks.families.flatMap((fam) => fam.members.map((id) => [id, fam])));
