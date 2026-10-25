@@ -163,3 +163,12 @@ test("families: colours, woods and copper's weathering folded; a lone type stays
   const fams = familiesOf([t("minecraft:stone", 90), t("minecraft:white_concrete", 10), t("minecraft:terracotta", 8), t("minecraft:red_concrete", 5), t("minecraft:orange_terracotta", 4), t("minecraft:oak_stairs", 3), t("minecraft:copper_chest", 2)]);
   assert.deepEqual(fams.map((f) => [f.name, f.count, f.members.length]), [["concrete", 15, 2], ["terracotta", 12, 2]]);
 });
+
+test("modded ids: the work blocks are stations, not every table or pot; a wire is redstone only by name", () => {
+  const has = (id, key) => (kindsOfId(id) & KIND_BIT[key]) !== 0;
+  assert.ok(!has("somemod:barbed_wire", "redstone") && !has("somemod:wire_fence", "redstone"));
+  assert.ok(has("create:gearshift", "redstone") && has("somemod:redstone_relay", "redstone"));
+  assert.ok(!has("mcwfurnitures:oak_table", "stations") && !has("somemod:flower_pot", "stations"));
+  assert.ok(has("farmersdelight:cooking_pot", "stations") && has("farmersdelight:cutting_board", "stations"));
+  assert.ok(!has("somemod:light_oak_planks", "lighting") && has("somemod:wall_lamp", "lighting"));
+});

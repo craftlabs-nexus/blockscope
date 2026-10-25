@@ -8,7 +8,7 @@
 /** A name made of the words of an id: `(^|:|_)word(_|$)`, so "rail" is not "railing". */
 const words = (list) => new RegExp(`(^|[:_])(${list})(?=$|_)`);
 const MODDED = /^(?!minecraft:)/;
-const modded = (re) => (id) => MODDED.test(id) && re.test(id);
+const modded = (t) => (id) => MODDED.test(id) && (typeof t === "function" ? t(id) : t.test(id));
 const either = (...tests) => (id) => tests.some((t) => (typeof t === "function" ? t(id) : t.test(id)));
 
 const REDSTONE_CORE = /^minecraft:(redstone_wire|repeater|comparator|observer|redstone_(wall_)?torch|redstone_block|lever|.*_button|.*_pressure_plate|tripwire(_hook)?|daylight_detector|target|note_block|(sticky_)?piston|piston_head|moving_piston|dispenser|dropper|hopper|powered_rail|detector_rail|activator_rail|redstone_lamp|tnt|trapped_chest|iron_door|iron_trapdoor|(calibrated_)?sculk_sensor|sculk_shrieker|.*copper_bulb|crafter|lightning_rod)$/;
@@ -25,15 +25,16 @@ const SHAPED = /stairs|slab|_wall$|bricks?|tiles?|fence|button|pressure_plate|po
  */
 export const KINDS = [
   { key: "redstone", name: "Redstone", tip: "dust, repeaters, comparators, observers, pistons, hoppers, levers and the like, and the blocks they stand on, point into, watch, read, push or feed (one step; no signal is followed)",
-    ids: either(REDSTONE_CORE, modded(/redstone|wire|relay|gearshift|comparator/)) },
+    ids: either(REDSTONE_CORE, modded(/redstone|(^|[:_])(relay|gearshift|comparator)(?=$|_)/)) },
   { key: "lighting", name: "Lighting", tip: "torches, lanterns, lamps, candles, glowstone, sea lanterns, froglights, end rods",
     ids: either(/^minecraft:((soul_|copper_)?(wall_)?torch|.*lantern|glowstone|shroomlight|end_rod|.*candle(_cake)?|(soul_)?campfire|.*froglight|glow_lichen|beacon|redstone_lamp|.*copper_bulb)$/,
-      modded(/(^|[:_])(lamps?|lights?(?!_(gray|grey|blue))|lanterns?|candles?|torch(es)?|chandeliers?|sconces?)(?=$|_)/)) },
+      modded(/(^|[:_])(lamps?|lights?(?!_(gray|grey|blue|oak|wood|planks))|lanterns?|candles?|torch(es)?|chandeliers?|sconces?)(?=$|_)/)) },
   { key: "storage", name: "Storage", tip: "chests, barrels, shulker boxes, hoppers, furnaces, drawers and crates",
     ids: either(STORAGE, /^storagedrawers:/, modded(words("drawers?|chests?|barrels?|crates?|storage"))) },
   { key: "stations", name: "Stations", tip: "crafting tables, furnaces, anvils, stonecutters, looms, lecterns, cauldrons, composters and other blocks you work at",
     ids: either(/^minecraft:(crafting_table|.*anvil|stonecutter|loom|smithing_table|grindstone|enchanting_table|cartography_table|fletching_table|lectern|jukebox|composter|bell|(.*_)?cauldron|beehive|bee_nest|respawn_anchor|lodestone|(blast_)?furnace|smoker|brewing_stand|crafter)$/,
-      modded(words("tables?|stations?|stoves?|pots?|ovens?|sinks?|infusers?|waystones?|boards?"))) },
+      // a modded table is furniture and a pot holds a plant: the work blocks are named for their work
+      modded(either(words("crafting_table|work_?bench|stations?|stoves?|cooking_pot|ovens?|sinks?|infusers?|waystones?|cutting_board|anvils?|altars?|presses?|mills?"), /:(crafting|enchanting|alchemy|brewing|sawmill|smithing)_/))) },
   { key: "trees", name: "Trees", tip: "leaves and saplings, and the logs that touch the leaves (or such a log)", ids: LEAVES },
   { key: "plants", name: "Plants", tip: "grass, flowers, ferns, vines, crops, mushrooms, cactus, sugar cane, kelp, coral",
     ids: either(/^minecraft:(short_grass|grass|tall_grass|(short|tall)_dry_grass|fern|large_fern|dandelion|poppy|blue_orchid|allium|azure_bluet|.*_tulip|oxeye_daisy|cornflower|lily_of_the_valley|wither_rose|torchflower(_crop)?|pitcher_(plant|crop)|sunflower|lilac|rose_bush|peony|.*_petals|wildflowers|leaf_litter|vine|.*_vines(_plant)?|(pale_)?moss_carpet|.*_mushroom|.*_fungus|(crimson|warped|hanging)_roots|sugar_cane|cactus(_flower)?|bamboo(_sapling)?|kelp(_plant)?|(tall_)?seagrass|lily_pad|sweet_berry_bush|(.*_)?bush|wheat|carrots|potatoes|beetroots|(attached_)?(melon|pumpkin)_stem|cocoa|nether_wart|spore_blossom|(big|small)_dripleaf(_stem)?|.*_coral(_wall)?(_fan)?|.*_flower)$/,
