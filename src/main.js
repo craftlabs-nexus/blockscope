@@ -1010,8 +1010,8 @@ function describeBlock(so, x, y, z) {
     // say what hides it. Its kinds, and why it is Redstone when it is so only by a neighbour.
     const ci = file.schem.index(x, y, z), hidden = hiddenWhy(ci);
     if (hidden) id = `${id === "minecraft:air" ? "air" : id} (hidden ${hidden})`;
-    const why = REDSTONE_REASONS[blocks.kinds?.reason[ci] ?? 0];
-    const kinds = kindsOfMask(blocks.kinds?.mask[ci] ?? 0).map((k) => ({ kind: k, why: k === "redstone" && why !== "a component" ? why : null }));
+    const reason = blocks.kinds?.reason[ci] ?? 0;   // 1: a component itself; more: a neighbour of one, and why
+    const kinds = kindsOfMask(blocks.kinds?.mask[ci] ?? 0).map((k) => ({ kind: k, why: k === "redstone" && reason > 1 ? REDSTONE_REASONS[reason] : null }));
     // what the file and the page know about it: a sign's text (dye, glow, waxed, back side), a painting on this block;
     // `quote` is the short form a copy carries (the sign's front text, the painting's label)
     const k = `${x},${y},${z}`, s = signAt.get(k), p = paintingAt.get(k);

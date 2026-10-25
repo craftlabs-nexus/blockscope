@@ -142,9 +142,9 @@ test("cell groups: one a (part, kinds, type) combination, air 0, and the cells t
   assert.equal(small.groups[1], small.groups[2], "b's stone and cobblestone (both terrain) share a group without their types");
   // hide group of b's stone; the lookup answers per cell and lists like a Set
   const flags = new Uint8Array(c.size); flags[g] = 1;
-  const hidden = new HiddenCells(c.groups, flags);
-  assert.deepEqual([[...hidden], hidden.size, hidden.has(0), hidden.has(1)], [[1], 1, false, true]);
-  assert.deepEqual([...new HiddenCells(c.groups, new Uint8Array(c.size), (i) => i === 3)], [3]);
+  const hidden = new HiddenCells(c.groups, flags), extra = new HiddenCells(c.groups, new Uint8Array(c.size), (i) => i === 3);
+  assert.deepEqual([0, 1, 2, 3].map((i) => hidden.has(i)), [false, true, false, false]);
+  assert.deepEqual([0, 1, 2, 3].map((i) => extra.has(i)), [false, false, false, true]);
 });
 
 test("materials by kind: each block in the first of its kinds, what it is for before what it is part of", () => {
@@ -199,4 +199,10 @@ test("redstone: a wire with no side connected was a cross before 1.16, powering 
   const old = await build(3, 2, 3, blocks, 2230), now = await build(3, 2, 3, blocks, 3700);
   assert.equal(whyAt(old, classify(old), 2, 1, 1), "powered by a component");
   assert.equal(classify(now).reason[now.index(2, 1, 1)], 0);
+});
+
+test("cell groups past every limit: one group, nothing broken", async () => {
+  const s = await build(2, 1, 1, { "0,0,0": "minecraft:stone", "1,0,0": "minecraft:chest[facing=north,type=single]" });
+  const k = classify(s), t = typesOf(s), c = codeGroups(s, new Uint16Array([1, 2]), k.mask, t.ofPalette, 1);
+  assert.deepEqual([c.size, c.typed, [...c.groups]], [1, false, [0, 0]]);
 });

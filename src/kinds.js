@@ -54,10 +54,12 @@ export const KINDS = [
   { key: "wall", name: "Walls", tip: "the outer walls (the file's metadata, or a roofed box's sides)", shell: "wall" },
   { key: "floor", name: "Floor", tip: "the floor (the file's metadata, or a roofed box's bottom layer)", shell: "floor" },
 ];
+// a cell's kinds are 16 bits (a Uint16Array, and 16 bits of a cell group's key in codeGroups)
+if (KINDS.length > 16) throw new Error(`kinds.js: ${KINDS.length} kinds do not fit a 16-bit mask`);
 export const KIND_BIT = Object.fromEntries(KINDS.map((k, i) => [k.key, 1 << i]));
 const RED = KIND_BIT.redstone, TREES = KIND_BIT.trees, STORAGE_BIT = KIND_BIT.storage;
 
-/** Why a block is Redstone (classify's `reason`, by code). */
+/** Why a block is Redstone (classify's `reason`, by code: 1 a component itself, more a neighbour of one). */
 export const REDSTONE_REASONS = [null, "a component", "holds a component", "powered by a component", "watched by an observer", "read by a comparator", "pushed by a piston", "fed by a hopper or dropper", "worked by a component"];
 const R = { core: 1, holds: 2, powered: 3, watched: 4, read: 5, pushed: 6, fed: 7, worked: 8 };
 
@@ -243,24 +245,23 @@ export function codeGroups(schem, part, mask, ofPalette, limit = 65535) {
   if (typed) return { ...typed, typed: true };
   const untyped = code(false);
   if (untyped) return { ...untyped, typed: false };
-  // more parts × kinds than the code holds: not a file anyone has made; the parts are left out too
+  // more parts × kinds than the code holds: not a file anyone has made; the parts are left out too, and past that
+  // (it cannot be: 16 bits of kinds) every block shares one group, so nothing can be hidden but nothing breaks
   part = new Uint16Array(n);
-  return { ...code(false), typed: false };
+  const kindsOnly = code(false);
+  if (kindsOnly) return { ...kindsOnly, typed: false };
+  groups.fill(0);
+  return { groups, part: new Uint16Array(1), kinds: new Uint16Array(1), type: new Uint16Array(1), size: 1, typed: false };
 }
 
 /**
  * The cells hidden, as a lookup a cell at a time rather than a list: a cell is hidden when its group is (`flags`, one
- * byte a group), or when `extra(i)` says so (a type hidden in a file whose groups leave types out). Iterable, with a
- * `size`, so it reads like the Set of cell indices it stands for.
+ * byte a group), or when `extra(i)` says so (a type hidden in a file whose groups leave types out). It answers `has`
+ * as the Set of cell indices it stands for would.
  */
 export class HiddenCells {
   constructor(groups, flags, extra = null) { this.groups = groups; this.flags = flags; this.extra = extra; }
   has(i) { return this.flags[this.groups[i]] === 1 || (this.extra !== null && this.extra(i)); }
-  get size() {
-    if (this.count === undefined) { let n = 0; for (let i = 0; i < this.groups.length; i++) if (this.has(i)) n++; this.count = n; }
-    return this.count;
-  }
-  *[Symbol.iterator]() { for (let i = 0; i < this.groups.length; i++) if (this.has(i)) yield i; }
 }
 
 // The materials list grouped by kind: each block counts once, in the first of its kinds in this order (what a block
