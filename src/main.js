@@ -761,15 +761,24 @@ function smartFit() {
 // moves the picture's center there without moving the camera, so the pivot, a fit and a turn all sit in what you can
 // see. None while the panel is folded, takes most of the width (a phone), or a picture is being taken.
 let bareView = 0;
-function freeLeft() {
-  const panel = $("hud");
-  if (bareView || capture.on || !panel || panel.classList.contains("collapsed")) return 0;
-  const c = canvas.getBoundingClientRect(), h = panel.getBoundingClientRect(), left = h.right + 10 - c.left;
-  return h.width && left > 0 && left < c.width * 0.5 ? left : 0;
+// The canvas's size and the panel's right edge, measured again only when either is resized or the panel folds (the
+// frame loop checks the offset every frame, so a switched camera or a resize gets it; reading layout every frame could
+// force one)
+let layoutNow = null;
+const layoutChanged = () => { layoutNow = null; };
+new ResizeObserver(layoutChanged).observe(canvas);
+new ResizeObserver(layoutChanged).observe($("hud"));
+new MutationObserver(layoutChanged).observe($("hud"), { attributes: true, attributeFilter: ["class"] });
+function measureLayout() {
+  if (layoutNow) return layoutNow;
+  const panel = $("hud"), c = canvas.getBoundingClientRect(), h = panel.getBoundingClientRect(), left = h.right + 10 - c.left;
+  const beside = !panel.classList.contains("collapsed") && h.width && left > 0 && left < c.width * 0.5 ? left : 0;
+  return (layoutNow = { W: c.width, H: c.height, left: beside });
 }
+function freeLeft() { return bareView || capture.on ? 0 : measureLayout().left; }
 function applyViewOffset() {
   const cam = camera(); if (!cam?.setViewOffset) return;
-  const { width: W, height: H } = canvas.getBoundingClientRect(), shift = freeLeft() / 2, v = cam.view;
+  const { W, H } = measureLayout(), shift = freeLeft() / 2, v = cam.view;
   if (!shift || !W || !H) { if (v?.enabled) { cam.clearViewOffset(); redraw(); } return; }
   if (v?.enabled && v.fullWidth === W && v.fullHeight === H && v.offsetX === -shift) return;
   cam.setViewOffset(W, H, -shift, 0, W, H); redraw();
