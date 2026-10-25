@@ -15,7 +15,7 @@ import { buildPack, packName, wantedNamespaces, PACK_PREFIX } from "./pack/build
 import { noModsSource, droppedSource, fileSource } from "./pack/sources.js";
 import { REDSTONE_TWEAKS, extraPackBlob } from "./pack/extras.js";
 import { tidyRendererPacks, switchPack, keepBaseLowest, packManager } from "./pack/packs.js";
-import { clear as clearStore, usage } from "./pack/store.js";
+import { clear as clearStore, usage, get as storeGet, put as storePut } from "./pack/store.js";
 import { resolvePlan, loadPlan, optionalJson, DEFAULT_PLAN, SCHEMATIC_EXT } from "./plans.js";
 import { createMaterials } from "./materials/panel.js";
 import { esc } from "./html.js";
@@ -1416,7 +1416,20 @@ $("buildGif").onclick = () => captureBuild();
 async function openLocal(f, metaFile = null) {
   let meta = null;
   if (metaFile) { try { meta = JSON.parse(await metaFile.text()); } catch (e) { status(`${metaFile.name}: ${e.message}`, "err"); } }
-  await openFile({ name: f.name, url: null, param: null, bytes: new Uint8Array(await f.arrayBuffer()), meta, paintings: [], paintingsBase: null });
+  const rec = { name: f.name, url: null, param: null, bytes: new Uint8Array(await f.arrayBuffer()), meta, paintings: [], paintingsBase: null };
+  // the dev server keeps the last file from disk in this browser's IndexedDB, so a reload opens it again (?local=)
+  if (import.meta.env.DEV) storePut("meta", DEV_LOCAL_KEY, { name: rec.name, bytes: rec.bytes, meta });
+  await openFile(rec);
+}
+// On the dev server only: the last file opened from disk, kept in the browser (never sent anywhere), and the address
+// names it (?local=<file name>) so a reload, which would otherwise open the default plan, opens it again with the
+// rest of the link (layers, parts, camera). A build has neither.
+const DEV_LOCAL_KEY = "dev:local-file";
+async function reopenLocal(name) {
+  const kept = await storeGet("meta", DEV_LOCAL_KEY);
+  if (kept?.name !== name) return false;
+  await openFile({ name: kept.name, url: null, param: null, bytes: kept.bytes, meta: kept.meta ?? null, paintings: [], paintingsBase: null }, { fromUrl: true });
+  return true;
 }
 // the metadata file among `files` that goes with the schematic `schem`: <stem>.meta.json, else the only .meta.json
 function metaFor(schem, files) {
@@ -1483,6 +1496,8 @@ function syncUrl(now = false) {
     const u = new URL(location.href), q = u.searchParams;
     // a file from disk cannot be linked: the link then opens the default plan
     if (file.param) q.set("schem", file.param); else q.delete("schem");
+    // the dev server reopens the last file from disk by name (reopenLocal)
+    if (import.meta.env.DEV && !file.param) q.set("local", file.name); else q.delete("local");
     for (const k of ["minY", "maxY"]) q.delete(k);
     // only what differs from the first load: the hall's roof is hidden by default, so that needs no parameter
     const off = hiddenParts().filter((p) => !(p === "roof" && roofHiddenByDefault())); if (off.length) q.set("hide", off.join(",")); else q.delete("hide");
@@ -1746,9 +1761,11 @@ window.inspectAt = pinWorld;
 showShellState(); renderParts(); renderPackInfo();
 {
   const param = params.get("schem") ?? DEFAULT_PLAN;
+  const local = import.meta.env.DEV && !params.get("schem") ? params.get("local") : null;
   let url = null;
   try { url = param ? resolvePlan(param) : null; } catch (e) { status(e.message, "err"); }
-  if (url) {
+  if (local && (await reopenLocal(local))) { /* the file from disk, again */ }
+  else if (url) {
     status(`loading ${param}…`, "busy");
     try { await openFile({ ...(await loadPlan(url)), param }, { fromUrl: true }); }
     catch (e) { status(`${e.message}; open or drop a schematic`, "err"); }
