@@ -12,7 +12,7 @@ const modded = (t) => (id) => MODDED.test(id) && (typeof t === "function" ? t(id
 const either = (...tests) => (id) => tests.some((t) => (typeof t === "function" ? t(id) : t.test(id)));
 
 const REDSTONE_CORE = /^minecraft:(redstone_wire|repeater|comparator|observer|redstone_(wall_)?torch|redstone_block|lever|.*_button|.*_pressure_plate|tripwire(_hook)?|daylight_detector|target|note_block|(sticky_)?piston|piston_head|moving_piston|dispenser|dropper|hopper|powered_rail|detector_rail|activator_rail|redstone_lamp|tnt|trapped_chest|iron_door|iron_trapdoor|(calibrated_)?sculk_sensor|sculk_shrieker|.*copper_bulb|crafter|.*lightning_rod)$/;
-const STORAGE = /^minecraft:(chest|trapped_chest|ender_chest|.*copper_chest|barrel|.*shulker_box|hopper|dropper|dispenser|(blast_)?furnace|smoker|brewing_stand|chiseled_bookshelf|decorated_pot)$/;
+const STORAGE = /^minecraft:(chest|trapped_chest|ender_chest|.*copper_chest|barrel|.*shulker_box|hopper|dropper|dispenser|(blast_)?furnace|smoker|brewing_stand|chiseled_bookshelf|decorated_pot|.*_shelf)$/;
 // a tree's crown: leaves, and a nether fungus's wart blocks and a huge mushroom's caps
 const LEAVES = either(/^(?!minecraft:potted_).*(_leaves|_sapling|_blossoms)$/, /^minecraft:(mangrove_roots|muddy_mangrove_roots|mangrove_propagule|(flowering_)?azalea|nether_wart_block|warped_wart_block|(brown|red)_mushroom_block)$/);
 // the wood a tree is made of: a tree's when it touches its leaves or another such log
@@ -29,7 +29,7 @@ export const KINDS = [
   { key: "redstone", name: "Redstone", tip: "dust, repeaters, comparators, observers, pistons, hoppers, levers and the like, and the blocks they stand on, point into, watch, read, push or feed (one step; no signal is followed)",
     ids: either(REDSTONE_CORE, modded(/redstone|(^|[:_])(relay|gearshift|comparator)(?=$|_)/)) },
   { key: "lighting", name: "Lighting", tip: "torches, lanterns, lamps, candles, glowstone, sea lanterns, froglights, end rods",
-    ids: either(/^minecraft:((soul_|copper_)?(wall_)?torch|.*lantern|glowstone|shroomlight|end_rod|.*candle(_cake)?|(soul_)?campfire|.*froglight|glow_lichen|beacon|redstone_lamp|.*copper_bulb)$/,
+    ids: either(/^minecraft:((soul_|copper_)?(wall_)?torch|.*lantern|glowstone|shroomlight|end_rod|.*candle(_cake)?|(soul_)?campfire|.*froglight|glow_lichen|beacon|redstone_lamp|.*copper_bulb|sea_pickle|light)$/,
       modded(/(^|[:_])(lamps?|lights?(?!_(gray|grey|blue|oak|wood|planks))|lanterns?|candles?|torch(es)?|chandeliers?|sconces?)(?=$|_)/)) },
   { key: "storage", name: "Storage", tip: "chests, barrels, shulker boxes, hoppers, furnaces, drawers and crates",
     ids: either(STORAGE, /^storagedrawers:/, modded(words("drawers?|chests?|barrels?|crates?|storage"))) },
@@ -39,7 +39,7 @@ export const KINDS = [
       modded(either(words("crafting_table|work_?bench|stations?|stoves?|cooking_pot|ovens?|sinks?|infusers?|waystones?|cutting_board|anvils?|altars?|presses?|mills?"), /:(crafting|enchanting|alchemy|brewing|sawmill|smithing)_/))) },
   { key: "trees", name: "Trees", tip: "leaves and saplings, and the logs that touch the leaves (or such a log)", ids: LEAVES },
   { key: "plants", name: "Plants", tip: "grass, flowers, ferns, vines, crops, mushrooms, cactus, sugar cane, kelp, coral",
-    ids: either(/^minecraft:(short_grass|grass|tall_grass|(short|tall)_dry_grass|fern|large_fern|dandelion|poppy|blue_orchid|allium|azure_bluet|.*_tulip|oxeye_daisy|cornflower|lily_of_the_valley|wither_rose|torchflower(_crop)?|pitcher_(plant|crop)|sunflower|lilac|rose_bush|peony|.*_petals|wildflowers|leaf_litter|vine|.*_vines(_plant)?|(pale_)?moss_carpet|.*_mushroom|.*_fungus|(crimson|warped|hanging)_roots|sugar_cane|cactus(_flower)?|bamboo(_sapling)?|kelp(_plant)?|(tall_)?seagrass|lily_pad|sweet_berry_bush|(.*_)?bush|wheat|carrots|potatoes|beetroots|(attached_)?(melon|pumpkin)_stem|cocoa|nether_wart|spore_blossom|(big|small)_dripleaf(_stem)?|.*_coral(_wall)?(_fan)?|.*_flower)$/,
+    ids: either(/^minecraft:(short_grass|grass|tall_grass|(short|tall)_dry_grass|fern|large_fern|dandelion|poppy|blue_orchid|allium|azure_bluet|.*_tulip|oxeye_daisy|cornflower|lily_of_the_valley|wither_rose|torchflower(_crop)?|pitcher_(plant|crop)|sunflower|lilac|rose_bush|peony|.*_petals|wildflowers|leaf_litter|vine|.*_vines(_plant)?|(pale_)?moss_carpet|.*_mushroom|.*_fungus|(crimson|warped|hanging)_roots|sugar_cane|cactus(_flower)?|bamboo(_sapling)?|kelp(_plant)?|(tall_)?seagrass|lily_pad|sweet_berry_bush|(.*_)?bush|wheat|carrots|potatoes|beetroots|(attached_)?(melon|pumpkin)_stem|cocoa|nether_wart|spore_blossom|(big|small)_dripleaf(_stem)?|.*_coral(_wall)?(_fan)?|.*_flower|(open|closed)_eyeblossom|sea_pickle|nether_sprouts|chorus_(plant|flower)|pale_hanging_moss|potted_.*)$/,
       modded(/(^|[:_])(grass(?!_block)|ferns?|flowers?|cattails?|reeds?|clover|cosmos|fronds?|litter)(?=$|_)/)) },
   { key: "water", name: "Water", tip: "water, lava and bubble columns (not waterlogged blocks)", ids: /^minecraft:(water|lava|bubble_column|water_cauldron|lava_cauldron)$/ },
   { key: "terrain", name: "Terrain", tip: "the ground as the world makes it: stone, dirt, grass blocks, sand, gravel, ores, snow and ice (never a shaped block: bricks, stairs, slabs, walls)",
@@ -334,7 +334,7 @@ export function familyOf(id) {
   const w = WOODEN.exec(path);
   if (w) {
     const stripped = w[1] ?? "", rest = path.slice(w[0].length);
-    if (NOT_WOOD.test(rest)) return own;
+    if (NOT_WOOD.test(rest) || (w[2] === "bamboo" && rest === "sapling")) return own;   // a bamboo shoot is no sapling
     const name = WOOD_PARTS.test(rest) ? `${stripped}${rest}` : `wooden ${stripped}${rest}`;
     return { key: `${ns}:${name.replace(/ /g, "_")}`, name: name.replace(/_/g, " "), by: "wood" };
   }

@@ -271,3 +271,9 @@ test("redstone: an extended piston has pushed its line; a sticky one holds the b
   const ku = classify(u);
   assert.deepEqual([whyAt(u, ku, 1, 0, 0), ku.reason[u.index(2, 0, 0)]], ["pushed by a piston", 0]);
 });
+
+test("kinds of the ids the lists had missed", () => {
+  const of = (id) => kindsOfMask(kindsOfId(`minecraft:${id}`));
+  assert.deepEqual([of("open_eyeblossom"), of("sea_pickle"), of("potted_poppy"), of("oak_shelf"), of("light"), of("chorus_plant")], [["plants"], ["lighting", "plants"], ["plants"], ["storage"], ["lighting"], ["plants"]]);
+  assert.equal(familyOf("minecraft:bamboo_sapling").by, null);
+});
