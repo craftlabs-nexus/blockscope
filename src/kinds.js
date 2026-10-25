@@ -275,42 +275,58 @@ export function firstKinds(mask) {
   return out;
 }
 
-// Families: the types that differ only by a colour, a wood or copper's weathering (every concrete, every wooden
-// stairs), folded into one row of the Types list.
+// Families: the types that differ only by a dye colour, a wood or copper's weathering (every concrete, every wooden
+// stairs, every copper block), folded into one row of the Types list.
 const COLOURS = "white|light_gray|gray|black|brown|red|orange|yellow|lime|green|cyan|light_blue|blue|purple|magenta|pink";
 const WOODS = "oak|spruce|birch|jungle|acacia|dark_oak|mangrove|cherry|pale_oak|bamboo|crimson|warped";
-const WEATHERED = /^(waxed_)?(exposed_|weathered_|oxidized_)?(?=.*copper)/;
+// copper's weathering, waxed or not: a prefix on its own (copper blocks, cut copper, lightning rods, bulbs, chests)
+const WEATHERED = /^(waxed_)?(exposed_|weathered_|oxidized_)?/;
 const COLOURED = new RegExp(`^(${COLOURS})_(?=.)`), WOODEN = new RegExp(`^(stripped_)?(${WOODS})_(?=.)`);
+// the blocks the game dyes in every colour: their colours are a family even where the file has only one of them
+const DYED = /^(wool|carpet|concrete|concrete_powder|terracotta|glazed_terracotta|stained_glass|stained_glass_pane|shulker_box|bed|banner|wall_banner|candle|candle_cake|dye)$/;
 // a wood's own parts read plainly ("planks"); anything else made of it is "wooden …"
-const WOOD_PARTS = /^(planks|log|wood|leaves|sapling|hyphae|stem|block)$/;
-/** A type's family: `{ key, name }` (key "namespace:rest"), or null for a type no family takes. */
+const WOOD_PARTS = /^(planks|log|wood|leaves|sapling|hyphae|stem|block|mosaic)$/;
+// what the nether's crimson and warped name that is no wood: their nylium, fungus, roots and wart
+const NOT_WOOD = /^(nylium|fungus|roots|wart_block)$/;
+/**
+ * A type's family: `{ key, name, by }` (key "namespace:rest"; by "colour", "wood" or "weathering"), or the type on its
+ * own (`by` null): the plain member of a family (terracotta, a copper chest) joins it under its own key.
+ */
 export function familyOf(id) {
   const [ns, path] = id.includes(":") ? id.split(":") : ["minecraft", id];
-  let rest = path, name = null;
-  if (WEATHERED.test(rest) && rest.replace(WEATHERED, "") !== rest) { rest = rest.replace(WEATHERED, ""); name = rest; }
-  else if (COLOURED.test(rest)) { rest = rest.replace(COLOURED, ""); name = rest; }
-  else if (WOODEN.test(rest)) {
-    const stripped = WOODEN.exec(rest)[1]; rest = rest.replace(WOODEN, "");
-    name = WOOD_PARTS.test(rest) ? `${stripped ?? ""}${rest}` : `wooden ${stripped ?? ""}${rest}`;
-    rest = `${stripped ?? ""}${rest}`;
+  const own = { key: `${ns}:${path}`, name: path.replace(/_/g, " "), by: null };
+  const weathered = path.replace(WEATHERED, "");
+  if (/copper|lightning_rod/.test(weathered)) {
+    // the copper block's own id keeps "_block", its weathered ones drop it (exposed_copper)
+    const rest = weathered === "copper_block" ? "copper" : weathered;
+    return { key: `${ns}:${rest}`, name: rest.replace(/_/g, " "), by: weathered === path ? null : "weathering" };
   }
-  if (name === null) {
-    // the plain member of a colour family (terracotta, glass) joins it under its own name
-    return { key: `${ns}:${path}`, name: path.replace(/_/g, " "), plain: true };
+  const c = COLOURED.exec(path);
+  if (c) { const rest = path.slice(c[0].length); return { key: `${ns}:${rest}`, name: rest.replace(/_/g, " "), by: "colour", dyed: DYED.test(rest) }; }
+  const w = WOODEN.exec(path);
+  if (w) {
+    const stripped = w[1] ?? "", rest = path.slice(w[0].length);
+    if (NOT_WOOD.test(rest)) return own;
+    const name = WOOD_PARTS.test(rest) ? `${stripped}${rest}` : `wooden ${stripped}${rest}`;
+    return { key: `${ns}:${name.replace(/ /g, "_")}`, name: name.replace(/_/g, " "), by: "wood" };
   }
-  return { key: `${ns}:${name.startsWith("wooden ") ? `wooden_${rest}` : rest}`, name: name.replace(/_/g, " "), plain: false };
+  return own;
 }
 /**
  * The families of `types` (typesOf's, most blocks first) with two members or more, most blocks first:
- * `[{ key, name, mod, count, members: [type ids] }]`; a type in none is left out.
+ * `[{ key, name, mod, count, members: [type ids] }]`; a type in none is left out. A colour family needs two colours
+ * of the block, or a block the game dyes (so red sand does not fold into sand, nor red nether bricks into nether bricks).
  */
 export function familiesOf(types) {
   const by = new Map();
   for (const t of types) {
     const f = familyOf(t.id); let e = by.get(f.key);
-    if (!e) by.set(f.key, (e = { key: f.key, name: f.name, mod: t.mod, count: 0, members: [], folded: 0 }));
-    e.count += t.count; e.members.push(t.id); if (!f.plain) e.folded++;
+    if (!e) by.set(f.key, (e = { key: f.key, name: f.name, mod: t.mod, count: 0, members: [], colours: 0, other: 0, dyed: false }));
+    e.count += t.count; e.members.push(t.id);
+    if (f.by === "colour") { e.colours++; e.dyed ||= f.dyed; } else if (f.by) e.other++;
   }
-  // a family is a fold of two or more types, at least one of them coloured, wooden or weathered
-  return [...by.values()].filter((e) => e.members.length >= 2 && e.folded >= 1).map(({ folded, ...e }) => e).sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+  return [...by.values()]
+    .filter((e) => e.members.length >= 2 && (e.other >= 1 || e.colours >= 2 || (e.colours >= 1 && e.dyed)))
+    .map(({ colours, other, dyed, ...e }) => e)
+    .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
 }

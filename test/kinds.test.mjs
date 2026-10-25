@@ -154,7 +154,7 @@ test("materials by kind: each block in the first of its kinds, what it is for be
 
 test("families: colours, woods and copper's weathering folded; a lone type stays itself", () => {
   assert.equal(familyOf("minecraft:light_blue_concrete").key, "minecraft:concrete");
-  assert.deepEqual(familyOf("minecraft:spruce_stairs"), { key: "minecraft:wooden_stairs", name: "wooden stairs", plain: false });
+  assert.deepEqual(familyOf("minecraft:spruce_stairs"), { key: "minecraft:wooden_stairs", name: "wooden stairs", by: "wood" });
   assert.equal(familyOf("minecraft:dark_oak_planks").name, "planks");
   assert.equal(familyOf("minecraft:stripped_cherry_log").name, "stripped log");
   assert.equal(familyOf("minecraft:waxed_oxidized_copper_chest").key, "minecraft:copper_chest");
@@ -180,4 +180,15 @@ test("trees: a nether fungus's stem under its wart blocks, a huge mushroom's ste
   // a melon's stem is a plant, never a tree's log
   const m = await build(2, 1, 1, { "0,0,0": "minecraft:melon_stem[age=7]", "1,0,0": "minecraft:oak_leaves[distance=1,persistent=true,waterlogged=false]" });
   assert.deepEqual(kindsAt(m, classify(m), 0, 0, 0), ["plants"]);
+});
+
+test("families: copper's weathering is one family; colours only of the dyed blocks or of two colours; the nether's no wood", () => {
+  for (const id of ["copper_block", "waxed_copper_block", "exposed_copper", "waxed_oxidized_copper"]) assert.equal(familyOf(`minecraft:${id}`).key, "minecraft:copper", id);
+  assert.equal(familyOf("minecraft:weathered_lightning_rod").key, "minecraft:lightning_rod");
+  assert.equal(familyOf("minecraft:crimson_nylium").by, null);
+  assert.equal(familyOf("minecraft:warped_roots").by, null);
+  assert.equal(familyOf("minecraft:crimson_planks").name, "planks");
+  const t = (id, count) => ({ id: `minecraft:${id}`, name: id, mod: null, count });
+  const names = familiesOf([t("sand", 9), t("red_sand", 3), t("nether_bricks", 8), t("red_nether_bricks", 2), t("terracotta", 5), t("orange_terracotta", 2), t("copper_block", 4), t("exposed_copper", 3), t("waxed_weathered_copper", 1)]).map((f) => `${f.name} ${f.members.length}`);
+  assert.deepEqual(names, ["copper 3", "terracotta 2"]);
 });
