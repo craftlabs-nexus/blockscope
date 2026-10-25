@@ -719,7 +719,8 @@ const OPPOSITE = { north: "south", south: "north", east: "west", west: "east" };
 let frontCache = { name: null, dir: null };
 function frontDirection() {
   const [lo, hi] = shownRange();
-  const cacheKey = `${schemName}|${[...hiddenPartSet].sort().join(",")}|${hiddenParts().join(",")}|${lo}-${hi}`;
+  // everything that hides blocks (parts, shell, kinds, types) and the layers drawn
+  const cacheKey = `${schemName}|${filterKey()}|${lo}-${hi}`;
   if (frontCache.name === cacheKey) return frontCache.dir;
   let dir = null;
   try {
