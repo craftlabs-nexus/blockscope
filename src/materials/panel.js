@@ -20,7 +20,8 @@ const HIGHLIGHT_MAX = 60000;
 /**
  * host: { $ (by id), file() ({ schem, hash, name } or null), scope() ({ lo, hi, hidden, chips }), meta(), parts(),
  * worldY(y), highlight(cells or null), soloPart(name), singleLayer(fileY), status(text, kind), download(blob, name),
- * iconsChanged() (the recipe book arrived: icons can be drawn) }.
+ * iconsChanged() (the recipe book arrived: icons can be drawn), kindGroups() ({ of(i), label(g), kindKey(g) }: each
+ * block's first kind, or null where kinds are not listed), soloKind(key) }.
  */
 export function createMaterials(host) {
   const { $ } = host;
@@ -36,6 +37,8 @@ export function createMaterials(host) {
   // ---- working it out -----------------------------------------------------------------------------------------------
   function groupFn(schem) {
     if (prefs.group === "layer") return { of: (i) => Math.floor(i / schem.perLayer), label: (y) => `y ${host.worldY(y)}` };
+    // each block in the first of its kinds (the page's: kinds.js firstKinds)
+    if (prefs.group === "kind") return host.kindGroups?.() ?? null;
     if (prefs.group !== "part") return null;
     const meta = host.meta(); if (!meta) return null;
     if (partCache.schem !== schem || partCache.meta !== meta) {
@@ -67,7 +70,7 @@ export function createMaterials(host) {
     const keys = grouping ? [...groups.keys()].sort((a, b) => a - b) : [...groups.keys()];
     const planned = planGroups(book, keys.map((key) => ({ key, demand: demandOf(groups.get(key)) })), { preset: rollup(), open: fs.open, pick: fs.pick, done: fs.done, have: fs.have, prefer });
     let sections;
-    if (grouping) sections = planned.sections.map((s) => ({ ...s, label: grouping.label(s.key), part: grouping.partName?.(s.key) ?? null, layer: prefs.group === "layer" ? s.key : null, blocks: groups.get(s.key).blocks }));
+    if (grouping) sections = planned.sections.map((s) => ({ ...s, label: grouping.label(s.key), part: grouping.partName?.(s.key) ?? null, kind: grouping.kindKey?.(s.key) ?? null, layer: prefs.group === "layer" ? s.key : null, blocks: groups.get(s.key).blocks }));
     else if (prefs.group === "mod") {
       const byNs = new Map();
       for (const n of planned.sections[0]?.leaves ?? []) { const ns = n.id.split(":")[0]; (byNs.get(ns) ?? byNs.set(ns, []).get(ns)).push(n); }
@@ -99,6 +102,7 @@ export function createMaterials(host) {
     $("matsOpen").setAttribute("aria-pressed", String(prefs.sheet));
     $("matsGroup").value = prefs.group; $("matsGroup").disabled = prefs.tab === "tree";
     $("matsGroup").querySelector('[value="part"]').disabled = !host.meta() || !host.parts().length;
+    $("matsGroup").querySelector('[value="kind"]').disabled = !host.kindGroups?.();
     $("matsNote").textContent = bookState === "ready" ? "" : bookState === "loading" ? "reading the recipes…" : bookState === "missing" ? "no recipes in this pack: rebuild it (File, Resource pack) for Gather and Raw" : "the recipes come with the pack";
   }
   function renderGroup() {
@@ -167,7 +171,7 @@ export function createMaterials(host) {
         if (s.extra && !s.leaves.length) continue;
         const rows = s.leaves.filter((n) => show(n, q));
         if (s.label !== null) {
-          const act = s.part ? `<button class="act" data-solo="${esc(s.part)}" title="Show only this part in the view">solo</button>` : s.layer !== null && s.layer !== undefined ? `<button class="act" data-layer="${s.layer}" title="Show only this layer in the view">single</button>` : "";
+          const act = s.part ? `<button class="act" data-solo="${esc(s.part)}" title="Show only this part in the view">solo</button>` : s.kind ? `<button class="act" data-kind="${esc(s.kind)}" title="Show only this kind in the view">solo</button>` : s.layer !== null && s.layer !== undefined ? `<button class="act" data-layer="${s.layer}" title="Show only this layer in the view">single</button>` : "";
           html += `<div class="msec"><span class="t">${esc(s.label)}</span><span class="c">${s.blocks !== null ? `${fmt(s.blocks)} blocks · ` : ""}${fmt(totalsOf(s.leaves).items)} items</span>${act}</div>`;
         }
         if (!rows.length) { if (s.label === null) html += `<p class="empty">${q ? "Nothing matches." : prefs.hideDone ? "You have everything on this list." : "No blocks in view."}</p>`; continue; }
@@ -279,6 +283,7 @@ export function createMaterials(host) {
       const tg = ev.target.closest("[data-tg]");
       if (tg) { const id = tg.dataset.tg, node = result?.all.nodes.get(id); fs.open[id] = !(node?.broken ?? false); persist(); keepFocus(recompute); return; }
       const solo = ev.target.closest("[data-solo]"); if (solo) { host.soloPart(solo.dataset.solo); return; }
+      const sk = ev.target.closest("[data-kind]"); if (sk) { host.soloKind(sk.dataset.kind); return; }
       const ly = ev.target.closest("[data-layer]"); if (ly) host.singleLayer(Number(ly.dataset.layer));
     });
     $("matsList").addEventListener("change", (ev) => {

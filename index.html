@@ -134,6 +134,11 @@
     .part .ic { display: inline-block; width: 14px; height: 14px; margin-right: 6px; vertical-align: -2px; border-radius: 2px; background: var(--raised); }
     .part .ic[src] { background: none; }
     .part .mod { color: var(--fg-dim); font-size: 11px; }
+    /* a family's caret, its members indented under it; a family with some types hidden shows a half eye */
+    .part .fold { width: 14px; height: 18px; margin: 0 2px 0 -2px; padding: 0; vertical-align: 0; font-size: 10px; color: var(--fg-dim); background: transparent; border-color: transparent; }
+    .part .fold:hover { color: var(--fg); }
+    .part.nested .nm { padding-left: 16px; }
+    .part.mixed .eye::before { content: "\25D0"; }
     .subh { margin: 9px 4px 1px; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-dim); }
     #typesMore { margin: 4px 0 0; height: 22px; padding: 0 8px; font-size: 11px; color: var(--fg-key); background: transparent; border-color: transparent; }
     #typesMore:hover { border-color: var(--line); }
@@ -480,7 +485,7 @@
       </div>
       <button id="matsCompact" class="toggle" aria-pressed="false" title="Ingots, nuggets, gems and the like as their 9-to-1 blocks">9×9</button>
       <button id="matsHideDone" class="toggle" aria-pressed="false" title="Hide what you have all of">Hide got</button>
-      <label>Group <select id="matsGroup" aria-label="group by"><option value="none">none</option><option value="part">part</option><option value="layer">layer</option><option value="mod">mod</option></select></label>
+      <label>Group <select id="matsGroup" aria-label="group by"><option value="none">none</option><option value="part">part</option><option value="layer">layer</option><option value="kind">kind</option><option value="mod">mod</option></select></label>
       <span class="sp"></span>
       <input id="matsFilter" type="search" placeholder="filter…" autocomplete="off" spellcheck="false" />
     </div>
@@ -552,7 +557,9 @@
       <dt><kbd>PgUp</kbd> <kbd>PgDn</kbd> or <kbd>[</kbd> <kbd>]</kbd></dt><dd>step a layer</dd>
       <dt><kbd>C</kbd></dt><dd>copy the pinned block (file, coordinates, block, part, link)</dd>
       <dt><kbd>M</kbd></dt><dd>the materials list</dd>
-      <dt><kbd>/</kbd></dt><dd>find a kind or type of block</dd>
+      <dt><kbd>/</kbd></dt><dd>find a kind or type of block (<kbd>&uarr;</kbd> <kbd>&darr;</kbd> pick, <kbd>Enter</kbd> hide or show, <kbd>Shift</kbd>+<kbd>Enter</kbd> solo)</dd>
+      <dt><kbd>X</kbd> / <kbd>Shift</kbd>+<kbd>X</kbd></dt><dd>hide the pinned block's type / show it alone</dd>
+      <dt><kbd>K</kbd></dt><dd>the pinned block's kinds in the Blocks list</dd>
       <dt><kbd>Esc</kbd></dt><dd>unpin the block, close this</dd>
       <dt><kbd>H</kbd></dt><dd>collapse the panel</dd>
       <dt><kbd>?</kbd></dt><dd>this reference</dd>

@@ -63,7 +63,11 @@ one for the Roof toggle and one for Inspect.
   block too), push or feed, and the doors and lamps beside them, one step out with no signal followed; Inspect says
   why. Trees take the logs that touch their leaves. A metadata record's `kind` adds kinds outright. The kinds are left
   out of a file they cannot split (under 64 blocks, or nearly all one kind), the whole group out of a file of one
-  type. The types list shows the 40 largest until "show all"; <kbd>/</kbd> filters both lists. Hiding Terrain on a
+  type. The types list folds the types that differ only by a colour, a wood or copper's weathering into one row (every
+  concrete, every wooden stairs: ▸ lists them, the eye hides them all, a half eye says some are hidden), and shows the
+  40 largest rows until "show all". <kbd>/</kbd> filters both lists; in the filter the arrows pick a row, Enter hides
+  or shows it, Shift+Enter solos it. With a block pinned, <kbd>X</kbd> hides its type (Shift+X: only its type) and
+  <kbd>K</kbd> picks its kinds in the list. Hiding Terrain on a
   million-block landscape draws in milliseconds once its cut faces are built (the first time, about half a second).
 - **Materials.** What the blocks in view take (`src/materials/`): the layers drawn, less the hidden shell and parts,
   unless the list is pinned. The panel's group shows the biggest items; List (<kbd>M</kbd>) opens the sheet. A block
@@ -87,7 +91,8 @@ one for the Roof toggle and one for Inspect.
   order and each craft is rounded up to whole crafts, the spare kept. ▸ on a row makes that item from its ingredients
   and ▾ gets it as it is, whatever the rollup. Units: items, stacks or shulker boxes, and 9×9 for ingots and the like
   as blocks; the totals give stacks, shulker boxes and inventories. Group by part (with solo), by layer (bottom first,
-  what you have handed to the lowest layers first) or by mod. Hovering a row lights its blocks up in the view and says
+  what you have handed to the lowest layers first), by kind (with solo; each block in the first of its kinds, what it
+  is for before what it is part of: a sea lantern in the roof is lighting, a stone floor the floor) or by mod. Hovering a row lights its blocks up in the view and says
   what a made item goes into; hovering a block names its item and how many are in view. Have values, ticks and choices
   are kept per file (by its hash) in this browser; Copy, `.md`, `.csv` and `.json` export the list.
 

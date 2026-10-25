@@ -6,7 +6,7 @@ import * as THREE from "three";
 import JSZip from "jszip";
 import { analyzeFolder, analyzePackZip, detectPackZip, fromFileList } from "@craftlabs/packrat";
 import { Schematic } from "./schematic.js";
-import { classify, typesOf, codeGroups, HiddenCells, KINDS, KIND_BIT, REDSTONE_REASONS, kindsOfMask } from "./kinds.js";
+import { classify, typesOf, familiesOf, firstKinds, codeGroups, HiddenCells, KINDS, KIND_BIT, KIND_ORDER, REDSTONE_REASONS, kindsOfMask } from "./kinds.js";
 import { partOf, partsOf } from "./parts.js";
 import { framedRealId } from "./framed.js";
 import { decoratedRealId, DYES } from "./decorated.js";
@@ -60,7 +60,7 @@ const hiddenPartSet = new Set();
 // shown, none of its kinds is hidden (with kinds picked by solo: when it is of one of them) and its type is shown. The
 // shell kinds (roof, walls, floor) are the View group's toggles: `shell` holds them for both. ?kind=a,b shows only
 // those kinds, ?hideKind=a,b hides them; ?type=id,… and ?hideType=id,… the same for types.
-let blocks = { kinds: null, types: null };   // classify() and typesOf() of the file
+let blocks = { kinds: null, types: null, families: [], familyOf: new Map() };   // classify(), typesOf() and familiesOf() of the file
 const hiddenKinds = new Set(), onlyKinds = new Set(), hiddenTypes = new Set();
 const SHELL_KEYS = ["roof", "wall", "floor"];
 const maskOf = (keys) => { let m = 0; for (const k of keys) m |= KIND_BIT[k] ?? 0; return m; };
@@ -165,6 +165,9 @@ function setFile(f, { fromUrl = false } = {}) {
   shellCells = parts; rowCells.clear(); frontCache = { name: null, dir: null };
   Object.assign(info, s.info(), { shell: counts, roofCover, meta: meta !== null, parts: meta ? partsOf(meta, own ? s.partOrder : null) : [] });
   blocks = { kinds: classify(s, { shellCells, meta }), types: typesOf(s) };
+  blocks.families = familiesOf(blocks.types.types);
+  blocks.familyOf = new Map(blocks.families.flatMap((fam) => fam.members.map((id) => [id, fam])));
+  openFamilies.clear(); blockSel = []; kindGroupCache = null;
   // the pack source for this file (its own mod list, unless the visitor gave their own pack)
   const before = source; pickSource(); if (source !== before) { packReport = null; renderPackInfo(); }
   signAt.clear(); for (const sg of s.signs) signAt.set(`${sg.x},${sg.y},${sg.z}`, sg);
@@ -322,14 +325,25 @@ const mats = createMaterials({
   status: (t, k) => status(t, k),
   download: (blob, name) => download(blob, name),
   iconsChanged: () => renderBlocks(),
+  kindGroups,
+  soloKind: (key) => soloKind(key),
 });
+// the materials list's groups by kind: each block in the first of its kinds (kinds.js KIND_ORDER), once per file
+let kindGroupCache = null;
+function kindGroups() {
+  if (!file || !blocks.kinds?.shown) return null;
+  if (kindGroupCache?.file !== file) kindGroupCache = { file, idx: firstKinds(blocks.kinds.mask) };
+  const { idx } = kindGroupCache;
+  return { of: (i) => idx[i], label: (g) => (KIND_ORDER[g] ? kindName(KIND_ORDER[g]) : "No kind"), kindKey: (g) => KIND_ORDER[g] ?? null };
+}
 /** What the Blocks group hides, in words: "only redstone", "no terrain, trees", "3 types hidden". */
 function blockWords() {
   const out = [], lower = (k) => kindName(k).toLowerCase();
   if (onlyKinds.size) out.push(`only ${[...onlyKinds].map(lower).join(", ")}`);
   else if (hiddenKinds.size) out.push(`no ${[...hiddenKinds].map(lower).join(", ")}`);
-  const st = soloedType();
+  const st = soloedType(), sf = st ? null : soloedFamily();
   if (st) out.push(`only ${typeOf(st)?.name ?? st}`);
+  else if (sf) out.push(`only the ${blocks.families.find((f) => f.key === sf).name}`);
   else if (hiddenTypes.size) out.push(`${hiddenTypes.size} type${hiddenTypes.size === 1 ? "" : "s"} hidden`);
   return out;
 }
@@ -430,7 +444,10 @@ function cellsOfRow(row) {
   if (rowCells.has(id)) return rowCells.get(id);
   const c = codedNow(), lists = groupCellsNow();
   let out = null, test = () => false;
-  if (row.axis === "part") { const at = info.parts.findIndex((p) => p.name === row.key) + 1; if (at > 0) test = (g) => c.part[g] === at; }
+  if (row.axis === "family") {
+    const fam = blocks.families.find((x) => x.key === row.key), lists = (fam?.members ?? []).map((id) => cellsOfRow({ axis: "type", key: id }));
+    out = new Int32Array(lists.reduce((n, l) => n + l.length, 0)); let o = 0; for (const l of lists) { out.set(l, o); o += l.length; }
+  } else if (row.axis === "part") { const at = info.parts.findIndex((p) => p.name === row.key) + 1; if (at > 0) test = (g) => c.part[g] === at; }
   else if (row.axis === "kind") { const bit = KIND_BIT[row.key] ?? 0; test = (g) => (c.kinds[g] & bit) !== 0; }
   else {
     const t = (blocks.types?.types.findIndex((x) => x.id === row.key) ?? -1) + 1;
@@ -1084,10 +1101,12 @@ function soloPart(name) {
 }
 /** One row of the Parts, Kinds or Types list: eye (shown or hidden), name, count, solo. Hovering lights its blocks up
  *  (`ghost`: the row), the name flies to them, the eye hides or shows them, solo shows them alone (again: all). */
-function rowEl({ name, sub = "", count, title, hidden, solo, soloTitle, icon = null, onEye, onSolo, onFly, ghost: row }) {
-  const el = document.createElement("div"); el.className = `part${hidden ? " hid" : ""}`; el.title = title;
+function rowEl({ name, sub = "", count, title, hidden, mixed = false, solo, soloTitle, icon = null, fold = null, nested = false, onEye, onSolo, onFly, ghost: row }) {
+  const el = document.createElement("div"); el.className = `part${hidden ? " hid" : mixed ? " mixed" : ""}${nested ? " nested" : ""}`; el.title = title;
   const eye = document.createElement("button"); eye.className = "eye"; eye.title = hidden ? `Show ${name}` : `Hide ${name}`;
   const nm = document.createElement("span"); nm.className = "nm";
+  // a family's row opens on its caret to its members
+  if (fold) { const b = document.createElement("button"); b.className = "fold"; b.textContent = fold.open ? "\u25BE" : "\u25B8"; b.title = fold.open ? "Fold the family" : "Show its types"; b.onclick = (ev) => { ev.stopPropagation(); fold.toggle(); }; nm.append(b); }
   if (icon) { const img = document.createElement("img"); img.className = "ic"; img.alt = ""; icon(img); nm.append(img); }
   nm.append(name);
   if (sub) { const m = document.createElement("span"); m.className = "mod"; m.textContent = ` · ${sub}`; nm.append(m); }
@@ -1129,14 +1148,17 @@ function selectPartRow(name) { for (const [n, r] of partRows) r.classList.toggle
 // largest until "show all" or a filter.
 const TYPES_SHOWN = 40;
 let typesAll = false;
-const blockRows = new Map();   // "kind:<key>" or "type:<id>" -> its row
+const blockRows = new Map();   // "kind:<key>", "family:<key>" or "type:<id>" -> its row, in the list's order
+const blockActs = new Map();   // the same keys -> { eye, solo }: what a row's buttons do, for the keyboard
+const openFamilies = new Set();   // the families listed open
+let blockSel = [];   // the rows picked: by the arrow keys in the filter (one), or a block's kinds (K)
 const soloedKind = () => (onlyKinds.size === 1 ? [...onlyKinds][0] : null);
 const soloedType = () => { const t = blocks.types?.types ?? []; return t.length > 1 && hiddenTypes.size === t.length - 1 ? (t.find((x) => !hiddenTypes.has(x.id))?.id ?? null) : null; };
 function renderBlocks() {
   const k = blocks.kinds, ty = blocks.types?.types ?? [];
   const showKinds = !!k?.shown, showTypes = ty.length >= 2;
   $("blocksGrp").style.display = showKinds || showTypes ? "" : "none";
-  blockRows.clear();
+  blockRows.clear(); blockActs.clear();
   const filter = $("blockFilter").value.trim().toLowerCase();
   const kindsOff = showKinds ? k.listed.filter((x) => !kindShown(x)).length : 0;
   $("blocksSum").textContent = [showKinds && `${k.listed.length} kinds`, `${ty.length} types`, kindsOff + hiddenTypes.size && `${kindsOff + hiddenTypes.size} hidden`].filter(Boolean).join(" · ");
@@ -1154,31 +1176,78 @@ function renderBlocks() {
       onEye: () => toggleKind(key), onSolo: () => soloKind(key), onFly: () => flyToRow({ axis: "kind", key }),
     });
     if (filter && !lower.includes(filter) && !key.includes(filter)) el.classList.add("none");
-    kl.append(el); blockRows.set(`kind:${key}`, el);
+    kl.append(el); blockRows.set(`kind:${key}`, el); blockActs.set(`kind:${key}`, { eye: () => toggleKind(key), solo: () => soloKind(key) });
   }
-  // types: the largest first, the first 40 until "show all"; a filter searches names, ids and mods
+  // types: the largest first, the types of a family (every concrete) folded into one row; the first 40 rows until
+  // "show all". A filter searches names, ids and mods, and opens the families it finds types in.
   const tl = $("types"); tl.replaceChildren();
   $("typesHead").style.display = tl.style.display = showTypes ? "" : "none";
-  const soloT = soloedType();
-  let listed = 0, matching = 0;
-  if (showTypes) for (const t of ty) {
-    if (filter && !t.name.includes(filter) && !t.id.includes(filter) && !(t.mod ?? "").includes(filter)) continue;
-    matching++;
-    if (!filter && !typesAll && listed >= TYPES_SHOWN) continue;
-    listed++;
+  const soloT = soloedType(), soloF = soloedFamily();
+  const matches = (t) => !filter || t.name.includes(filter) || t.id.includes(filter) || (t.mod ?? "").includes(filter);
+  const typeRow = (t, nested) => {
     const hid = hiddenTypes.has(t.id);
     const el = rowEl({
-      name: t.name, sub: t.mod ?? "", count: t.count, hidden: hid, solo: soloT === t.id, ghost: { axis: "type", key: t.id },
+      name: t.name, sub: t.mod ?? "", count: t.count, hidden: hid, solo: soloT === t.id, nested, ghost: { axis: "type", key: t.id },
       icon: (img) => mats.iconOfBlock(t.id).then((u) => { if (u) img.src = u; }),
       title: `${t.id}: ${t.count.toLocaleString("en-US")} blocks, ${hid ? "hidden" : "shown"}. Click the name to fly to them, the eye to ${hid ? "show" : "hide"} them`,
       soloTitle: soloT === t.id ? "Show every type again" : `Show only ${t.name}`,
       onEye: () => toggleType(t.id), onSolo: () => soloType(t.id), onFly: () => flyToRow({ axis: "type", key: t.id }),
     });
-    tl.append(el); blockRows.set(`type:${t.id}`, el);
+    tl.append(el); blockRows.set(`type:${t.id}`, el); blockActs.set(`type:${t.id}`, { eye: () => toggleType(t.id), solo: () => soloType(t.id) });
+  };
+  let shownRows = 0;
+  const entries = typeEntries();
+  if (showTypes) for (const e of entries) {
+    if (!filter && !typesAll && shownRows >= TYPES_SHOWN) break;
+    if (!e.family) { if (matches(e.type)) { typeRow(e.type, false); shownRows++; } continue; }
+    const fam = e.family, members = fam.members.map(typeOf);
+    const famMatch = matches({ name: fam.name, id: fam.key, mod: fam.mod });
+    const listedMembers = filter && !famMatch ? members.filter(matches) : members;
+    if (!listedMembers.length) continue;
+    const open = filter ? true : openFamilies.has(fam.key), off = fam.members.filter((id) => hiddenTypes.has(id)).length;
+    const el = rowEl({
+      name: fam.name, sub: `${fam.members.length} types${fam.mod ? ` · ${fam.mod}` : ""}`, count: fam.count,
+      hidden: off === fam.members.length, mixed: off > 0 && off < fam.members.length, solo: soloF === fam.key, ghost: { axis: "family", key: fam.key },
+      icon: (img) => mats.iconOfBlock(fam.members[0]).then((u) => { if (u) img.src = u; }),
+      fold: { open, toggle: () => { if (openFamilies.has(fam.key)) openFamilies.delete(fam.key); else openFamilies.add(fam.key); renderBlocks(); } },
+      title: `${fam.name}: ${fam.members.length} types (${members.map((t) => t.name).join(", ")}), ${fam.count.toLocaleString("en-US")} blocks${off ? `, ${off} hidden` : ""}. The caret lists them`,
+      soloTitle: soloF === fam.key ? "Show every type again" : `Show only the ${fam.name}`,
+      onEye: () => toggleFamily(fam), onSolo: () => soloFamily(fam), onFly: () => flyToRow({ axis: "family", key: fam.key }),
+    });
+    tl.append(el); blockRows.set(`family:${fam.key}`, el); blockActs.set(`family:${fam.key}`, { eye: () => toggleFamily(fam), solo: () => soloFamily(fam) });
+    shownRows++;
+    if (open) for (const t of listedMembers) typeRow(t, true);
   }
   const more = $("typesMore");
-  more.hidden = !showTypes || filter !== "" || ty.length <= TYPES_SHOWN;
-  more.textContent = typesAll ? "show the first 40" : `${listed} of ${ty.length} types · show all`;
+  more.hidden = !showTypes || filter !== "" || entries.length <= TYPES_SHOWN;
+  more.textContent = typesAll ? "show the first 40" : `${Math.min(TYPES_SHOWN, entries.length)} of ${entries.length} rows · show all`;
+  // the rows picked with the keyboard or Inspect stay picked
+  for (const [key, el] of blockRows) el.classList.toggle("sel", blockSel.includes(key));
+}
+/** The Types list's rows before a filter: each family once (where its blocks rank), the other types on their own. */
+function typeEntries() {
+  const out = [], seen = new Set();
+  for (const t of blocks.types?.types ?? []) {
+    const fam = blocks.familyOf.get(t.id);
+    if (!fam) out.push({ type: t, count: t.count });
+    else if (!seen.has(fam.key)) { seen.add(fam.key); out.push({ family: fam, count: fam.count }); }
+  }
+  return out.sort((a, b) => b.count - a.count);
+}
+const soloedFamily = () => {
+  const ty = blocks.types?.types ?? [];
+  for (const fam of blocks.families) if (hiddenTypes.size === ty.length - fam.members.length && fam.members.every((id) => !hiddenTypes.has(id))) return fam.key;
+  return null;
+};
+function toggleFamily(fam) {
+  const all = fam.members.every((id) => hiddenTypes.has(id));
+  for (const id of fam.members) if (all) hiddenTypes.delete(id); else hiddenTypes.add(id);
+  return blocksChanged(`${all ? "with" : "without"} the ${fam.name}`);
+}
+function soloFamily(fam) {
+  const solo = soloedFamily() === fam.key, keep = new Set(fam.members);
+  hiddenTypes.clear(); if (!solo) for (const t of blocks.types.types) if (!keep.has(t.id)) hiddenTypes.add(t.id);
+  return blocksChanged(solo ? "every type" : `only the ${fam.name}`);
 }
 /** After a kind or type is hidden or shown: the lists, the shell buttons and the view follow. */
 function blocksChanged(what) { showShellState(); renderBlocks(); return reloadLayers(what); }
@@ -1209,17 +1278,41 @@ $("blocksAll").onclick = () => {
   for (const k of SHELL_KEYS) if (blocks.kinds?.shown && blocks.kinds.listed.includes(k)) shell[k] = true;
   blocksChanged("every kind and type");
 };
-$("blockFilter").oninput = renderBlocks;
-$("blockFilter").onkeydown = (ev) => { if (ev.key === "Escape") { ev.target.value = ""; renderBlocks(); ev.target.blur(); } ev.stopPropagation(); };
+$("blockFilter").oninput = () => { blockSel = []; renderBlocks(); };
+// In the filter: the arrows move through the rows listed, Enter hides or shows the row picked (else the first),
+// Shift+Enter solos it, Esc clears the filter and leaves it.
+$("blockFilter").onkeydown = (ev) => {
+  ev.stopPropagation();
+  const keys = [...blockRows].filter(([, el]) => !el.classList.contains("none")).map(([key]) => key);
+  if (ev.key === "Escape") { ev.target.value = ""; blockSel = []; renderBlocks(); ev.target.blur(); }
+  else if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+    ev.preventDefault(); if (!keys.length) return;
+    const at = keys.indexOf(blockSel[0]), d = ev.key === "ArrowDown" ? 1 : -1;
+    blockSel = [keys[at < 0 ? (d > 0 ? 0 : keys.length - 1) : Math.max(0, Math.min(keys.length - 1, at + d))]];
+    for (const [key, el] of blockRows) el.classList.toggle("sel", blockSel.includes(key));
+    blockRows.get(blockSel[0])?.scrollIntoView({ block: "nearest" });
+  } else if (ev.key === "Enter") {
+    ev.preventDefault();
+    const key = keys.includes(blockSel[0]) ? blockSel[0] : keys[0], act = blockActs.get(key); if (!act) return;
+    blockSel = [key]; (ev.shiftKey ? act.solo : act.eye)();
+  }
+};
 $("typesMore").onclick = () => { typesAll = !typesAll; renderBlocks(); };
-function revealBlockRow(axis, key) {
+/** Opens the Blocks group at rows (`[axis, key]` pairs: a kind, a type, a family), picks them and scrolls to the first. */
+function revealBlockRows(rows) {
   $("blocksGrp").open = true; $("blockFilter").value = "";
-  if (axis === "type" && blocks.types.types.findIndex((t) => t.id === key) >= TYPES_SHOWN) typesAll = true;
+  const entries = typeEntries();
+  for (const [axis, key] of rows) {
+    const fam = axis === "type" ? blocks.familyOf.get(key) : null;
+    if (fam) openFamilies.add(fam.key);
+    const at = entries.findIndex((e) => (fam ? e.family === fam : e.type?.id === key || e.family?.key === key));
+    if (axis !== "kind" && at >= TYPES_SHOWN) typesAll = true;
+  }
+  blockSel = rows.map(([axis, key]) => `${axis}:${key}`);
   renderBlocks();
-  const r = blockRows.get(`${axis}:${key}`); if (!r) return;
-  for (const x of blockRows.values()) x.classList.toggle("sel", x === r);
-  r.scrollIntoView({ block: "nearest" });
+  blockRows.get(blockSel[0])?.scrollIntoView({ block: "nearest" });
 }
+const revealBlockRow = (axis, key) => revealBlockRows([[axis, key]]);
 function revealPartRow(name) { $("partsGrp").open = true; const r = partRows.get(name); if (!r) return; $("partFilter").value = ""; renderParts(); selectPartRow(name); partRows.get(name)?.scrollIntoView({ block: "nearest" }); }
 // Fly to a part: aim the orbit pivot at the middle of its blocks and back the camera off along its current direction
 // far enough to see the whole part. Returns the box flown to (file cells, inclusive), or null.
@@ -1827,6 +1920,7 @@ addEventListener("keydown", (ev) => {
   else if (k === "m" || k === "M") mats.toggleSheet();
   else if (k === "?" || (c === "Slash" && ev.shiftKey)) setHelp(!help.classList.contains("on"));
   else if (k === "/") { if ($("blocksGrp").style.display !== "none") { $("blocksGrp").open = true; $("blockFilter").focus(); } }
+  else if (k === "x" || k === "X" || k === "k" || k === "K") pinnedBlockKey(k.toLowerCase(), ev.shiftKey);
   else if (k === "Escape") { if (about.classList.contains("on")) setAbout(false); else if (help.classList.contains("on")) setHelp(false); else if (!mats.close()) showBlock(null); }
   else return;
   ev.preventDefault();
@@ -1963,6 +2057,16 @@ async function focusType(id, { solo = false, highlight = false } = {}) {
   if (!t) throw new Error(`${schemName} has no ${typeId(id)}; its types, most blocks first: ${typeList().slice(0, 30).map((x) => x.id).join(", ")}`);
   if (solo ? soloedType() !== t.id : hiddenTypes.has(t.id)) { const settled = waitSettle(120000); await (solo ? soloType(t.id) : toggleType(t.id)); await settled; }
   return focusRowNow({ axis: "type", key: t.id }, t.id, highlight);
+}
+/** X hides the pinned block's type (Shift+X shows it alone, again: every type); K picks its kinds in the Blocks list. */
+function pinnedBlockKey(key, shift) {
+  const c = pinned.cell;
+  if (!c || !file) { status(`click a block first, then ${key.toUpperCase()} ${key === "x" ? "hides its type" : "shows its kinds"}`); return; }
+  const i = file.schem.index(c.x, c.y, c.z), t = blocks.types.types[blocks.types.ofPalette[file.schem.data[i]] - 1];
+  if (key === "x") { if (!t) return; if (shift) soloType(t.id); else toggleType(t.id); return; }
+  const ks = kindsOfMask(blocks.kinds.mask[i]).filter((x) => blocks.kinds.shown && blocks.kinds.listed.includes(x));
+  if (!ks.length) { status(`${t?.name ?? "this block"} is of no kind listed here`); return; }
+  revealBlockRows(ks.map((x) => ["kind", x]));
 }
 function focusBlockNow(wx, wy, wz, { radius = 3, pin = true } = {}) {
   const [ox, oy, oz] = info.offset, c = [wx - ox, wy - oy, wz - oz];

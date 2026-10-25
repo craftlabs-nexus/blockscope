@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { encodeNbt, gzip, encodeVarints } from "../src/nbt.js";
 import { Schematic } from "../src/schematic.js";
-import { classify, typesOf, codeGroups, HiddenCells, kindsOfId, kindsShown, kindsOfMask, KINDS, KIND_BIT, REDSTONE_REASONS, KINDS_MIN_BLOCKS, KINDS_MIN_SECOND } from "../src/kinds.js";
+import { classify, typesOf, familyOf, familiesOf, firstKinds, KIND_ORDER, codeGroups, HiddenCells, kindsOfId, kindsShown, kindsOfMask, KINDS, KIND_BIT, REDSTONE_REASONS, KINDS_MIN_BLOCKS, KINDS_MIN_SECOND } from "../src/kinds.js";
 
 const i32 = (v) => ({ t: 3, v }), i16 = (v) => ({ t: 2, v });
 
@@ -144,4 +144,22 @@ test("cell groups: one a (part, kinds, type) combination, air 0, and the cells t
   const hidden = new HiddenCells(c.groups, flags);
   assert.deepEqual([[...hidden], hidden.size, hidden.has(0), hidden.has(1)], [[1], 1, false, true]);
   assert.deepEqual([...new HiddenCells(c.groups, new Uint8Array(c.size), (i) => i === 3)], [3]);
+});
+
+test("materials by kind: each block in the first of its kinds, what it is for before what it is part of", () => {
+  const mask = new Uint16Array([KIND_BIT.lighting | KIND_BIT.roof, KIND_BIT.terrain | KIND_BIT.floor, KIND_BIT.redstone | KIND_BIT.storage, 0]);
+  assert.deepEqual([...firstKinds(mask)].map((g) => KIND_ORDER[g] ?? "none"), ["lighting", "floor", "redstone", "none"]);
+  assert.deepEqual([...KIND_ORDER].sort(), KINDS.map((k) => k.key).sort(), "every kind has a place");
+});
+
+test("families: colours, woods and copper's weathering folded; a lone type stays itself", () => {
+  assert.equal(familyOf("minecraft:light_blue_concrete").key, "minecraft:concrete");
+  assert.deepEqual(familyOf("minecraft:spruce_stairs"), { key: "minecraft:wooden_stairs", name: "wooden stairs", plain: false });
+  assert.equal(familyOf("minecraft:dark_oak_planks").name, "planks");
+  assert.equal(familyOf("minecraft:stripped_cherry_log").name, "stripped log");
+  assert.equal(familyOf("minecraft:waxed_oxidized_copper_chest").key, "minecraft:copper_chest");
+  assert.equal(familyOf("mcwfences:oak_picket_fence").key, "mcwfences:wooden_picket_fence", "a mod's families stay in the mod");
+  const t = (id, count) => ({ id, name: id.split(":")[1].replace(/_/g, " "), mod: null, count });
+  const fams = familiesOf([t("minecraft:stone", 90), t("minecraft:white_concrete", 10), t("minecraft:terracotta", 8), t("minecraft:red_concrete", 5), t("minecraft:orange_terracotta", 4), t("minecraft:oak_stairs", 3), t("minecraft:copper_chest", 2)]);
+  assert.deepEqual(fams.map((f) => [f.name, f.count, f.members.length]), [["concrete", 15, 2], ["terracotta", 12, 2]]);
 });

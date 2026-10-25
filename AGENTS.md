@@ -67,7 +67,7 @@ blockscope.state();                           // file, status, size, origin, hid
 | `screenshot(w, h)` | a PNG data URL of the canvas alone at that size |
 | `shot([x, y, z], [tx, ty, tz], w, h)` | places the camera (file positions, y from the bottom layer) and returns a screenshot |
 | `fit()` | the overview again |
-| `materials.list({ preset, group })` | the materials list of what the view shows (README, "Materials"), as the sheet's JSON export: `{ file, scope, rollup, totals, items: [{ group, id, name, need, have, total, packed, note }], fluids, unknown }`; `preset` `placed`, `gather` or `raw`, `group` `none`, `part`, `layer` or `mod`; the recipes arrive with the pack a moment after `ready()` (`materials.state().book` is `"ready"`) |
+| `materials.list({ preset, group })` | the materials list of what the view shows (README, "Materials"), as the sheet's JSON export: `{ file, scope, rollup, totals, items: [{ group, id, name, need, have, total, packed, note }], fluids, unknown }`; `preset` `placed`, `gather` or `raw`, `group` `none`, `part`, `layer`, `kind` or `mod`; the recipes arrive with the pack a moment after `ready()` (`materials.state().book` is `"ready"`) |
 | `materials.setHave(id, "2s")`, `materials.state()` | what the person has of an item (a number, `2s`, `1sb`, `3b`); the list's settings and this file's have values |
 
 A block can be framed and still not show: above the layers drawn, in a hidden part, kind or type, or in the roof the

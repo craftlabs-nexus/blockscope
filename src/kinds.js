@@ -256,3 +256,59 @@ export class HiddenCells {
   }
   *[Symbol.iterator]() { for (let i = 0; i < this.groups.length; i++) if (this.has(i)) yield i; }
 }
+
+// The materials list grouped by kind: each block counts once, in the first of its kinds in this order (what a block
+// is for before what it is part of: a sea lantern in the roof is lighting, a stone floor is the floor, not terrain).
+export const KIND_ORDER = ["redstone", "storage", "stations", "lighting", "signs", "openings", "rails", "glass", "fences", "water", "plants", "trees", "roof", "wall", "floor", "terrain"];
+/** Each cell's first kind in KIND_ORDER, as its place there (KIND_ORDER.length for a block of no kind). */
+export function firstKinds(mask) {
+  const bits = KIND_ORDER.map((k) => KIND_BIT[k]), none = KIND_ORDER.length, byMask = new Map();
+  const out = new Uint8Array(mask.length);
+  for (let i = 0; i < mask.length; i++) {
+    const m = mask[i];
+    let g = byMask.get(m);
+    if (g === undefined) { g = bits.findIndex((b) => m & b); if (g < 0) g = none; byMask.set(m, g); }
+    out[i] = g;
+  }
+  return out;
+}
+
+// Families: the types that differ only by a colour, a wood or copper's weathering (every concrete, every wooden
+// stairs), folded into one row of the Types list.
+const COLOURS = "white|light_gray|gray|black|brown|red|orange|yellow|lime|green|cyan|light_blue|blue|purple|magenta|pink";
+const WOODS = "oak|spruce|birch|jungle|acacia|dark_oak|mangrove|cherry|pale_oak|bamboo|crimson|warped";
+const WEATHERED = /^(waxed_)?(exposed_|weathered_|oxidized_)?(?=.*copper)/;
+const COLOURED = new RegExp(`^(${COLOURS})_(?=.)`), WOODEN = new RegExp(`^(stripped_)?(${WOODS})_(?=.)`);
+// a wood's own parts read plainly ("planks"); anything else made of it is "wooden …"
+const WOOD_PARTS = /^(planks|log|wood|leaves|sapling|hyphae|stem|block)$/;
+/** A type's family: `{ key, name }` (key "namespace:rest"), or null for a type no family takes. */
+export function familyOf(id) {
+  const [ns, path] = id.includes(":") ? id.split(":") : ["minecraft", id];
+  let rest = path, name = null;
+  if (WEATHERED.test(rest) && rest.replace(WEATHERED, "") !== rest) { rest = rest.replace(WEATHERED, ""); name = rest; }
+  else if (COLOURED.test(rest)) { rest = rest.replace(COLOURED, ""); name = rest; }
+  else if (WOODEN.test(rest)) {
+    const stripped = WOODEN.exec(rest)[1]; rest = rest.replace(WOODEN, "");
+    name = WOOD_PARTS.test(rest) ? `${stripped ?? ""}${rest}` : `wooden ${stripped ?? ""}${rest}`;
+    rest = `${stripped ?? ""}${rest}`;
+  }
+  if (name === null) {
+    // the plain member of a colour family (terracotta, glass) joins it under its own name
+    return { key: `${ns}:${path}`, name: path.replace(/_/g, " "), plain: true };
+  }
+  return { key: `${ns}:${name.startsWith("wooden ") ? `wooden_${rest}` : rest}`, name: name.replace(/_/g, " "), plain: false };
+}
+/**
+ * The families of `types` (typesOf's, most blocks first) with two members or more, most blocks first:
+ * `[{ key, name, mod, count, members: [type ids] }]`; a type in none is left out.
+ */
+export function familiesOf(types) {
+  const by = new Map();
+  for (const t of types) {
+    const f = familyOf(t.id); let e = by.get(f.key);
+    if (!e) by.set(f.key, (e = { key: f.key, name: f.name, mod: t.mod, count: 0, members: [], folded: 0 }));
+    e.count += t.count; e.members.push(t.id); if (!f.plain) e.folded++;
+  }
+  // a family is a fold of two or more types, at least one of them coloured, wooden or weathered
+  return [...by.values()].filter((e) => e.members.length >= 2 && e.folded >= 1).map(({ folded, ...e }) => e).sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+}
