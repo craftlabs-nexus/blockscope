@@ -41,3 +41,15 @@ export function fitInto(cam, target, corners, x0, want) {
   }
   cam.updateProjectionMatrix();
 }
+
+const OPPOSITE = { north: "south", south: "north", east: "west", west: "east" };
+/**
+ * The side the fronts clearly face (Fit turns to it), from their counts by facing (Schematic.fronts), or null. Clear:
+ * the side has at least twice the fronts of the side opposite it, and most of the fronts that do not cancel (a
+ * storage room: drawers north against a few south, its aisles' east and west chests cancelling).
+ */
+export function clearSide(net) {
+  const [side, lead] = Object.keys(OPPOSITE).map((d) => [d, net[d] - net[OPPOSITE[d]]]).sort((a, b) => b[1] - a[1])[0];
+  const unpaired = Math.abs(net.north - net.south) + Math.abs(net.east - net.west);
+  return lead >= 2 && net[side] >= 2 * net[OPPOSITE[side]] && lead >= 0.6 * unpaired ? side : null;
+}

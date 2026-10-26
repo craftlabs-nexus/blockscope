@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as THREE from "three";
-import { cornersOf, fillOf, fillWithoutOffset, fitInto } from "../src/view.js";
+import { cornersOf, fillOf, fillWithoutOffset, fitInto, clearSide } from "../src/view.js";
 
 const W = 1600, H = 900, PANEL = 360;
 const box = new THREE.Box3(new THREE.Vector3(-40, 0, -20), new THREE.Vector3(40, 10, 20));
@@ -39,4 +39,10 @@ test("a model that already fits is left where it is", () => {
     fitInto(cam, target, corners, x0, 0.9);
     assert.ok(cam.position.distanceTo(pos) < 1e-9 && cam.zoom === zoom);
   }
+});
+
+test("the side Fit faces: a clear lead of fronts, or none", () => {
+  assert.equal(clearSide({ north: 40, south: 3, east: 6, west: 6 }), "north", "drawers north, aisles cancelling");
+  assert.equal(clearSide({ north: 57, south: 57, east: 4, west: 3 }), null, "a landscape facing every way");
+  assert.equal(clearSide({ north: 0, south: 0, east: 4, west: 1 }), "east", "a few east fronts alone are a side: why Fit looks at the whole build, not one layer's");
 });

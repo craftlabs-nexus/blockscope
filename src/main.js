@@ -6,7 +6,7 @@ import * as THREE from "three";
 import JSZip from "jszip";
 import { analyzeFolder, analyzePackZip, detectPackZip, fromFileList } from "@craftlabs/packrat";
 import { Schematic } from "./schematic.js";
-import { cornersOf, fillWithoutOffset, fitInto } from "./view.js";
+import { cornersOf, fillWithoutOffset, fitInto, clearSide } from "./view.js";
 import { LoadState } from "./loadstate.js";
 import { classify, typesOf, familiesOf, onlyThese, kindsFromLink, firstKinds, codeGroups, HiddenCells, KINDS, KIND_BIT, KIND_ORDER, REDSTONE_REASONS, kindsOfMask } from "./kinds.js";
 import { partOf, partsOf } from "./parts.js";
@@ -773,26 +773,19 @@ function stopMomentum() {
 // game writes it: the front looks that way). Opposite fronts cancel (an aisle's two rows of chests say nothing about
 // which way to stand), drawers count double (a drawer's face is its whole point), signs half. The camera keeps the
 // library's fit distance and height and swings round to that side, turned 25° off square so the build still reads
-// as 3D; no clear side (a room whose two walls face each other) keeps the library's own view. Worked out once per
-// file and set of hidden parts (soloing the drawer wall faces its fronts).
+// as 3D; no clear side (a room whose two walls face each other) keeps the library's own view (view.js clearSide).
+// Worked out once per file and set of hidden blocks, over every layer (soloing the drawer wall faces its fronts; a
+// layer step leaves the side as it is).
 const FACE_DIR = { north: [0, -1], south: [0, 1], east: [1, 0], west: [-1, 0] };
-const OPPOSITE = { north: "south", south: "north", east: "west", west: "east" };
 let frontCache = { name: null, dir: null };
 function frontDirection() {
-  const [lo, hi] = shownRange();
-  // everything that hides blocks (parts, shell, kinds, types) and the layers drawn
-  const cacheKey = `${schemName}|${filterKey()}|${lo}-${hi}`;
+  // everything that hides blocks (parts, shell, kinds, types), but not the layers drawn: the side to face is the
+  // build's, so stepping through layers never turns the view (one layer's few chests once swung it round)
+  const cacheKey = `${schemName}|${filterKey()}`;
   if (frontCache.name === cacheKey) return frontCache.dir;
   let dir = null;
-  try {
-    // the fronts among the blocks drawn (the layers drawn, the hidden shell and parts left out), from the page's copy
-    const net = file.schem.fronts(lo, hi, hiddenCells());
-    const best = Object.keys(net).map((d) => [d, net[d] - net[OPPOSITE[d]]]).sort((a, b) => b[1] - a[1])[0];
-    // clear: the side has at least twice the fronts of the side opposite it, and most of the fronts that do not
-    // cancel (a storage room: drawers north against a few south, its aisles' east and west chests cancelling)
-    const unpaired = Math.abs(net.north - net.south) + Math.abs(net.east - net.west);
-    if (best[1] >= 2 && net[best[0]] >= 2 * net[OPPOSITE[best[0]]] && best[1] >= 0.6 * unpaired) dir = best[0];
-  } catch (e) { console.warn("[blockscope] could not read the fronts for Fit", e); }
+  try { dir = clearSide(file.schem.fronts(0, info.height - 1, hiddenCells())); }
+  catch (e) { console.warn("[blockscope] could not read the fronts for Fit", e); }
   frontCache = { name: cacheKey, dir };
   return dir;
 }
