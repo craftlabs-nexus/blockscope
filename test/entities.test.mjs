@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { encodeNbt, gzip, encodeVarints } from "../src/nbt.js";
 import { Schematic } from "../src/schematic.js";
-import { bannerPatterns, bannerKey, potSides, decoratedViewerId, decoratedRealId } from "../src/decorated.js";
+import { bannerPatterns, bannerKey, potSides, decoratedViewerId, decoratedRealId, headSkin, skinUrl } from "../src/decorated.js";
 import { cube, place, rotationSteps, HEADS, wallHeadId, pngSize } from "../src/pack/entities.js";
 
 const i32 = (v) => ({ t: 3, v }), i16 = (v) => ({ t: 2, v });
@@ -92,4 +92,34 @@ test("heads: every kind with its wall form", () => {
 test("pngSize reads the header", () => {
   const b = new Uint8Array(24); b.set([0, 0, 0, 64], 16); b.set([0, 0, 0, 32], 20);
   assert.deepEqual(pngSize(b), [64, 32]);
+});
+
+const HASH = "31f477eb1a7beee631c2ca64d06f8f68fa93a3386d04452ab27f43acdf1b60cb";
+const textures = (url) => Buffer.from(JSON.stringify({ timestamp: 1, profileName: "x", textures: { SKIN: { url } } })).toString("base64");
+
+test("head skins: the profile's textures, in either format; a bare name or another host has none", () => {
+  const now = { profile: { name: "MHF_OakLog", id: new Int32Array([1, 2, 3, 4]), properties: { t: 9, et: 10, v: [{ name: "textures", value: textures(`http://textures.minecraft.net/texture/${HASH}`), signature: "s" }] } } };
+  assert.equal(headSkin(now), HASH);
+  const old = { SkullOwner: { Name: "x", Properties: { textures: { t: 9, et: 10, v: [{ Value: textures(`https://textures.minecraft.net/texture/${HASH.toUpperCase()}`) }] } } } };
+  assert.equal(headSkin(old), HASH);
+  assert.equal(headSkin({ profile: "Notch" }), null);
+  assert.equal(headSkin({ profile: { name: "BeyazKrral", id: new Int32Array([1, 2, 3, 4]) } }), null);
+  assert.equal(headSkin({ profile: { properties: { t: 9, et: 10, v: [{ name: "textures", value: textures(`https://example.com/texture/${HASH}`) }] } } }), null);
+  assert.equal(skinUrl(HASH), `https://textures.minecraft.net/texture/${HASH}`);
+
+  const d = decoratedViewerId("minecraft:player_wall_head", now);
+  assert.deepEqual(d, { id: `blockscope:player_wall_head__${HASH.slice(0, 24)}`, kind: "head", wall: true, skin: HASH });
+  assert.deepEqual(decoratedRealId(d.id), { id: "minecraft:player_wall_head", kind: "head" });
+  assert.equal(decoratedViewerId("minecraft:player_head", { profile: "Notch" }), null);   // Steve: the game's own id
+});
+
+test("schematic: a skinned head renamed per skin, a skinless one kept", async () => {
+  const palette = { "minecraft:air": i32(0), "minecraft:player_wall_head[facing=east,powered=false]": i32(1), "minecraft:player_head[powered=false,rotation=8]": i32(2) };
+  const be = [{ Id: "minecraft:skull", Pos: new Int32Array([0, 0, 0]), profile: { name: "x", properties: { t: 9, et: 10, v: [{ name: "textures", value: textures(`http://textures.minecraft.net/texture/${HASH}`) }] } } }];
+  const nbt = { name: "", value: { Version: i32(2), DataVersion: i32(4000), Width: i16(2), Height: i16(1), Length: i16(1), PaletteMax: i32(3), Palette: palette, BlockData: encodeVarints([1, 2]), BlockEntities: { t: 9, et: 10, v: be } } };
+  const s = await Schematic.load(await gzip(encodeNbt(nbt)), "h.schem");
+  assert.deepEqual(s.decoratedCombos().map((c) => [c.kind, c.skin]), [["head", HASH]]);
+  const out = await Schematic.load(await s.render(), "out.schem");
+  assert.equal(out.idAt(out.index(0, 0, 0)), `blockscope:player_wall_head__${HASH.slice(0, 24)}[facing=east,powered=false]`);
+  assert.equal(out.idAt(out.index(1, 0, 0)), "minecraft:player_head[powered=false,rotation=8]");
 });

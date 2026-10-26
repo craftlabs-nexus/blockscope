@@ -129,6 +129,32 @@ class Textures {
     this.cache.set(name, out);
     return out;
   }
+  /**
+   * A player's skin (the PNG from Mojang's texture server) as a head's texture, or null for one that is no skin. Treated
+   * as the game treats a downloaded skin (SkinTextureDownloader): an old 64 × 32 skin padded to 64 × 64, the head's
+   * base layer made opaque, and an old skin's hat layer left out when it has no clear pixel (it was drawn solid).
+   */
+  async skin(hash, bytes) {
+    const name = `block/entity/skin/${hash}`;
+    if (this.cache.has(name)) return this.cache.get(name);
+    const PNG = [137, 80, 78, 71, 13, 10, 26, 10];
+    if (!(bytes?.length > 24) || PNG.some((b, i) => bytes[i] !== b)) return null;
+    const [w, h] = pngSize(bytes); if (w !== 64 || (h !== 64 && h !== 32)) return null;
+    const c = canvas(64, 64), g = c.getContext("2d");
+    g.drawImage(await bitmap(bytes), 0, 0);
+    const head = g.getImageData(0, 0, 32, 16);
+    for (let i = 3; i < head.data.length; i += 4) head.data[i] = 255;
+    g.putImageData(head, 0, 0);
+    if (h === 32) {
+      const hat = g.getImageData(32, 0, 32, 16);
+      let clear = false; for (let i = 3; i < hat.data.length; i += 4) if (hat.data[i] < 128) { clear = true; break; }
+      if (!clear) g.clearRect(32, 0, 32, 16);
+    }
+    this.zip.file(`assets/${GEN}/textures/${name}.png`, await pngOf(c));
+    const out = { ref: `${GEN}:${name}`, size: 64 };
+    this.cache.set(name, out);
+    return out;
+  }
   /** The end portal's view: the starfield layers over the dark, as one still texture. */
   async portal() {
     const stars = await this.bytes("entity/end_portal/end_portal"); if (!stars) return null;
@@ -201,10 +227,11 @@ const STANDING = { c: [8, 8, 8], s: 2 / 3 }, WALL = { c: [8, -8 / 3 - 5, 1], s: 
 
 /**
  * Writes the models and blockstates of the blocks drawn by block-entity renderers into `zip` (the merged pack), from
- * the client jar's entity textures, and those of `designs` (Schematic.decoratedCombos()); returns how many block ids
- * it covers and the textures it could not find.
+ * the client jar's entity textures, and those of `designs` (Schematic.decoratedCombos()); `skins` holds the skins'
+ * PNGs by texture hash (a head whose skin is missing shows Steve). Returns how many block ids it covers and the
+ * textures it could not find.
  */
-export async function addEntityBlocks(zip, clientZip, designs = []) {
+export async function addEntityBlocks(zip, clientZip, designs = [], { skins = new Map() } = {}) {
   const T = new Textures(clientZip, zip), missing = new Set();
   let made = 0;
   const model = (name, textures, elements, extra = {}) => zip.file(`assets/${GEN}/models/block/${name}.json`, JSON.stringify({ textures, elements, ...extra }));
@@ -226,20 +253,31 @@ export async function addEntityBlocks(zip, clientZip, designs = []) {
     });
   }
 
-  // mob heads and skulls (the player head with the default skin: a profile's own skin is not in the file)
-  for (const [name, h] of Object.entries(HEADS)) {
-    const t = await need(h.tex); if (!t) continue;
+  // mob heads and skulls: a head's floor turns and its wall model, under `key`, and the blockstates of its two ids
+  const headModels = (h, t, key, ns, floorId, wallId) => {
     const s = h.s ?? 1, cy = h.cy ?? 0, tex = { particle: t.ref, t: t.ref };
     for (const k of [-1, 0, 1, 2]) {
       // a part turned about z cannot also turn about y: between the 90° steps it hangs straight
       const els = boxes(k ? h.boxes.map(({ rotZ, ...b }) => (void rotZ, b)) : h.boxes, { c: [8, cy, 8], s }, t.size);
-      model(`head/${name}_${k + 1}`, tex, turned(els, k));
+      model(`head/${key}_${k + 1}`, tex, turned(els, k));
     }
-    model(`head/${wallHeadId(name)}`, tex, boxes(h.boxes, { c: [8, cy + 4, 4], s }, t.size));
+    model(`head/${key}_wall`, tex, boxes(h.boxes, { c: [8, cy + 4, 4], s }, t.size));
     const floor = {};
-    for (let r = 0; r < 16; r++) { const { y, k } = rotationSteps(r); floor[`rotation=${r}`] = { model: `${GEN}:block/head/${name}_${k + 1}`, ...ys(y) }; }
-    state("minecraft", name, floor);
-    state("minecraft", wallHeadId(name), Object.fromEntries(Object.entries(FACING_Y).map(([f, y]) => [`facing=${f}`, { model: `${GEN}:block/head/${wallHeadId(name)}`, ...ys(y) }])));
+    for (let r = 0; r < 16; r++) { const { y, k } = rotationSteps(r); floor[`rotation=${r}`] = { model: `${GEN}:block/head/${key}_${k + 1}`, ...ys(y) }; }
+    state(ns, floorId, floor);
+    state(ns, wallId, Object.fromEntries(Object.entries(FACING_Y).map(([f, y]) => [`facing=${f}`, { model: `${GEN}:block/head/${key}_wall`, ...ys(y) }])));
+  };
+  for (const [name, h] of Object.entries(HEADS)) {
+    const t = await need(h.tex); if (t) headModels(h, t, name, "minecraft", name, wallHeadId(name));
+  }
+  // player heads with a skin of their own (decorated.js): both ids per skin, whichever the file has
+  const steve = await T.use(HEADS.player_head.tex);
+  for (const d of designs.filter((x) => x.kind === "head")) {
+    const short = d.id.replace(`${GEN}:`, "").split("__")[1];
+    const own = skins.has(d.skin) ? await T.skin(d.skin, skins.get(d.skin)) : null;
+    if (!own) missing.add(`skin ${d.skin}`);
+    const t = own ?? steve;
+    if (t) headModels(HEADS.player_head, t, `skin/${short}`, GEN, `player_head__${short}`, `player_wall_head__${short}`);
   }
 
   // banners: one texture per color (and per pattern design), its standing turns and its wall model

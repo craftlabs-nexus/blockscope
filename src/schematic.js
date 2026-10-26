@@ -210,14 +210,14 @@ export class Schematic {
     const be = this.#entitiesByCell();
     for (let i = 0; i < this.data.length; i++) { const id = framed.get(this.data[i]); if (id) { const [x, y, z] = this.cellOf(i); yield [i, id, be.get(`${x},${y},${z}`)]; } }
   }
-  /** Every banner pattern set and pot sherd set the file uses: [{ id, kind, ... }] (decorated.js). */
+  /** Every banner pattern set, pot sherd set and head skin the file uses: [{ id, kind, ... }] (decorated.js). */
   decoratedCombos() {
     const out = new Map();
     for (const [, d] of this.#decoratedCells()) if (!out.has(d.id)) out.set(d.id, d);
     return [...out.values()];
   }
   *#decoratedCells() {
-    const ids = new Map(); this.keys.forEach((k, i) => { if (k && /^minecraft:([a-z_]+_banner|decorated_pot)$/.test(baseId(k))) ids.set(i, baseId(k)); });
+    const ids = new Map(); this.keys.forEach((k, i) => { if (k && /^minecraft:([a-z_]+_banner|decorated_pot|player(_wall)?_head)$/.test(baseId(k))) ids.set(i, baseId(k)); });
     if (!ids.size) return;
     const be = this.#entitiesByCell();
     for (let i = 0; i < this.data.length; i++) {

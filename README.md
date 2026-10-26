@@ -24,7 +24,7 @@ one for the Roof toggle and one for Inspect.
   it. The merged
   pack (the client's block assets, the mods' assets as they are, and generated in the page: chest models, the framed
   drawers' composites, and models for the blocks the game draws with block-entity renderers, which have no shape of
-  their own: banners with their colors and patterns, mob heads and skulls, shulker boxes, decorated pots and their
+  their own: banners with their colors and patterns, mob heads and skulls (player heads with the skin their profile names, fetched from Mojang's texture server, Steve for one without), shulker boxes, decorated pots and their
   sherds, the conduit, copper golem statues, the end portal and gateway, the books on lecterns and enchanting
   tables) is kept by the renderer in IndexedDB under a name that hashes everything that went into
   it, so a second visit renders without a download; the jars are kept too, so another schematic needs at most the
@@ -220,7 +220,7 @@ publishes them is not part of this repository.
 | `src/kinds.js` | kinds and types: each block's kinds in one pass (the redstone and tree neighbour rules), the types, and each cell's group for the renderer |
 | `src/blockmeta.js` | the block metadata (BlockInfo, or a Litematica file's regions) kept as a record index a cell |
 | `src/formats.js` | Litematica and structure files turned into Sponge ones, and the block metadata, mod list and description a file carries |
-| `src/parts.js`, `src/framed.js`, `src/decorated.js` | the plan's parts and shell from its metadata; framed drawers' ids per material set; patterned banners' and sherd pots' ids per design |
+| `src/parts.js`, `src/framed.js`, `src/decorated.js` | the plan's parts and shell from its metadata; framed drawers' ids per material set; patterned banners', sherd pots' and skinned heads' ids per design |
 | `src/plans.js` | plan files: the schematic, its metadata and paintings |
 | `src/paintings.js`, `src/buildgif.js` | the paintings overlay; the build animation's framing and GIF encoding |
 | `src/materials/` | the materials list: the recipe book read from the jars (`book.js`), blocks to items, counting and rolling up (`engine.js`, no DOM), item icons from the pack's textures (`icons.js`), the group and the sheet (`panel.js`) |

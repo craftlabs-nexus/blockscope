@@ -1,7 +1,8 @@
 // The resource pack for one schematic, built in the browser: the Minecraft client jar's block assets, the assets of
 // the mods whose namespaces the schematic uses (from the pack source, through Packrat: the plan, then fetchRows with
 // every listed hash checked), the chest models and the schematic's framed drawers (generated.js) and the models of the
-// blocks the game draws with block-entity renderers (entities.js), merged into one
+// blocks the game draws with block-entity renderers (entities.js, with the player heads' skins from Mojang's texture
+// server), merged into one
 // zip the renderer loads. The renderer keeps that zip in its own database under the pack's name; the name is a hash
 // of everything that goes into it (packName), so an unchanged schematic and source never build twice.
 //
@@ -16,11 +17,12 @@ import { clientJar, clientRecord, hasClient } from "./mojang.js";
 import { fetchWithProgress } from "./download.js";
 import { addChests, addFramed } from "./generated.js";
 import { addEntityBlocks } from "./entities.js";
+import { skinUrl } from "../decorated.js";
 import { sha256Text } from "./sources.js";
 import { buildBook, BOOK_FILE } from "../materials/book.js";
 
 /** Bump when what the builder writes changes, so every cached pack is rebuilt. */
-export const GENERATOR = 6;   // 2: the materials list's recipe book and the item textures; 4: chests mapped as the game maps them; 5: banners, heads, shulker boxes, pots, conduit, statues, portals; 6: the recipe book's crops, machines and sets
+export const GENERATOR = 7;   // 2: the materials list's recipe book and the item textures; 4: chests mapped as the game maps them; 5: banners, heads, shulker boxes, pots, conduit, statues, portals; 6: the recipe book's crops, machines and sets; 7: player heads with their skins
 export const PACK_PREFIX = "blockscope:";
 const MODRINTH_UA = "craftlabs-nexus/blockscope/0.1 (https://github.com/craftlabs-nexus/blockscope)";
 // what of the client jar goes in: the block assets and the textures block models and the renderer read (entity
@@ -35,6 +37,30 @@ export function wantedNamespaces(schematic) {
   for (const c of schematic.framedCombos()) for (const t of [c.side, c.trim, c.front]) if (t && t.includes("-")) ns.add(t.split("-")[0]);
   ns.delete("minecraft"); ns.delete("blockscope");
   return [...ns].sort();
+}
+
+/**
+ * The player heads' skins by texture hash: `kept` from an earlier build, and `hashes` fetched from Mojang's texture
+ * server (its CORS lets the page read them) once the visitor agrees, then kept for the next build. A skin that cannot
+ * be fetched, or a declined download, is left out: those heads show Steve, and the report says so.
+ */
+async function fetchSkins(hashes, kept, { consent, signal, ui, report }) {
+  const out = new Map(kept);
+  if (!hashes.length) return out;
+  try { await consent(); } catch { report.notes.push(`${hashes.length} player head skin${hashes.length === 1 ? "" : "s"} not downloaded (declined): those heads show Steve`); return out; }
+  let done = 0;
+  const one = async (h) => {
+    try {
+      const r = await fetch(skinUrl(h), { signal });
+      if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+      const u8 = new Uint8Array(await r.arrayBuffer());
+      out.set(h, u8); report.downloaded += u8.length;
+      await putFile(`skin:${h}`, new Blob([u8], { type: "image/png" }), `${h}.png`);
+    } catch (e) { if (signal?.aborted) throw e; report.notes.push(`skin ${h.slice(0, 12)}…: ${e.message}; its heads show Steve`); }
+    ui.progress(`player heads' skins from Mojang: ${++done} of ${hashes.length}`, done / hashes.length);
+  };
+  for (let i = 0; i < hashes.length; i += 6) await Promise.all(hashes.slice(i, i + 6).map(one));
+  return out;
 }
 
 /** The pack's name for a schematic and a source: the renderer finds a pack it already holds by it. */
@@ -63,7 +89,7 @@ async function scanNamespaces(blob) {
 
 /**
  * Builds the pack. `ui` reports and asks: ui.progress(text, fraction?); ui.consent({ clientBytes, mods, modBytes,
- * minecraft, source }) resolves once the visitor agrees to download (rejects if they decline). It is asked before the
+ * skins, minecraft, source }) resolves once the visitor agrees to download (rejects if they decline). It is asked before the
  * first jar is downloaded, after the lookups that size the download: Mojang's version record and, for the mods,
  * the pack's files and Modrinth's record of them. Returns { blob, report }.
  */
@@ -73,6 +99,11 @@ export async function buildPack({ schematic, source, ui, signal }) {
   const report = { source: desc.name, sourceKind: source.kind, minecraft: desc.minecraft, wanted, mods: [], missing: [], notes: [], downloaded: 0 };
   let consented = null;
   const consent = (what) => (consented ??= ui.consent(what));
+  // the player heads' skins not kept from an earlier build: counted in the first ask
+  const skinDesigns = schematic.decoratedCombos().filter((d) => d.kind === "head");
+  const skinsKept = new Map(), skinsToFetch = [];
+  for (const h of new Set(skinDesigns.map((d) => d.skin))) { const b = await getFile(`skin:${h}`); if (b) skinsKept.set(h, new Uint8Array(await b.arrayBuffer())); else skinsToFetch.push(h); }
+  const skins = skinsToFetch.length;
 
   const clientCached = await hasClient(desc.minecraft);
   const clientBytes = clientCached ? 0 : (await clientRecord(desc.minecraft, signal)).size;
@@ -105,7 +136,7 @@ export async function buildPack({ schematic, source, ui, signal }) {
   const fetchSome = async (want, label) => {
     if (!want.length) return;
     // asked once per build, before the first file this browser does not have
-    for (const r of want) { const k = entryKey(r.entry); if (r.entry.origin?.type === "remote" && !(k && (await getFile(k)))) { await consent({ clientBytes: 0, mods: want.length, modBytes: 0, source: desc.name, minecraft: desc.minecraft }); break; } }
+    for (const r of want) { const k = entryKey(r.entry); if (r.entry.origin?.type === "remote" && !(k && (await getFile(k)))) { await consent({ clientBytes: 0, mods: want.length, modBytes: 0, skins, source: desc.name, minecraft: desc.minecraft }); break; } }
     const rowsIn = rows.map((r) => ({ ...r, selected: want.includes(r) }));
     const total = want.length;
     const run = fetchRows(rowsIn, {
@@ -172,7 +203,7 @@ export async function buildPack({ schematic, source, ui, signal }) {
         for (const h of hashes) for (const f of res[h]?.files ?? []) if (f.hashes?.sha512 === h) modBytes += f.size ?? 0;
       } catch (e) { report.notes.push(`Modrinth's file sizes: ${e.message}`); }
     }
-    if (clientBytes || toDownload.length) await consent({ clientBytes, mods: toDownload.length, modBytes, minecraft: desc.minecraft, source: desc.name });
+    if (clientBytes || toDownload.length) await consent({ clientBytes, mods: toDownload.length, modBytes, skins, minecraft: desc.minecraft, source: desc.name });
   }
   for (let round = 0; round < 4; round++) {
     const pick = round === 0 ? firstPick : pickRound();
@@ -221,7 +252,8 @@ export async function buildPack({ schematic, source, ui, signal }) {
   }
   const chests = await addChests(out, clientZip);
   const framed = await addFramed(out, schematic.framedCombos());
-  const entityBlocks = await addEntityBlocks(out, clientZip, schematic.decoratedCombos());
+  const skinBytes = await fetchSkins(skinsToFetch, skinsKept, { consent: () => consent({ clientBytes: 0, mods: 0, modBytes: 0, skins, minecraft: desc.minecraft, source: desc.name }), signal, ui, report });
+  const entityBlocks = await addEntityBlocks(out, clientZip, schematic.decoratedCombos(), { skins: skinBytes });
   const pv = JSON.parse((await clientZip.file("version.json")?.async("string")) ?? "{}").pack_version;
   out.file("pack.mcmeta", JSON.stringify({ pack: { pack_format: pv?.resource_major ?? pv?.resource ?? 1, description: `Blockscope: Minecraft ${desc.minecraft} + ${report.mods.length} mods from ${fromWords}` } }, null, 2));
   Object.assign(report, { vanillaFiles: vanilla, chests, framed: framed.made, framedMissing: framed.missing, entityBlocks: entityBlocks.made, entityTexturesMissing: entityBlocks.missing });

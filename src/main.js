@@ -559,6 +559,7 @@ function askConsent(what) {
   if (what.clientBytes) parts.push(`Minecraft ${what.minecraft}'s client jar from Mojang (${mb(what.clientBytes)})`);
   const from = source.fromFile ? "as the file lists them" : `from the ${what.source} pack`;
   if (what.mods) parts.push(`the jar${what.mods === 1 ? "" : "s"} of the ${what.mods === 1 ? "mod" : `${what.mods} mods`} it uses, ${from}, from Modrinth${what.modBytes ? ` (${mb(what.modBytes)})` : ""}`);
+  if (what.skins) parts.push(`the skin${what.skins === 1 ? "" : "s"} of ${what.skins === 1 ? "a player head" : `${what.skins} player heads`} from Mojang's texture server`);
   const total = (what.clientBytes ?? 0) + (what.modBytes ?? 0);
   $("consentText").textContent = `To draw this schematic your browser downloads ${parts.join(" and ")}${total && parts.length > 1 ? `: ${mb(total)} in all` : ""}. Later visits use the copies kept in this browser.`;
   $("consent").hidden = false; $("consentYes").focus();
