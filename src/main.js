@@ -1586,10 +1586,12 @@ const setCamera = (preset) => {
   stopMomentum();
   leaveTop();
   renderer?.cameraManager.switchCameraPreset(preset); camPreset = preset;
-  // the library frames the model for the whole canvas: Fit's framing, beside the panel and facing the fronts
-  userMoved = false; savedView.on = false; cancelRestores(); smartFit();
   keepBackground(); setTimeout(keepBackground, 50); setTimeout(keepBackground, 400);
   setTimeout(tuneControls, 0);
+  // the library frames the model for the whole canvas: Fit's framing instead, beside the panel and facing the fronts,
+  // once the renderer has drawn with the new camera (its shape is set on that frame; before, the iso frame overflowed)
+  userMoved = false; savedView.on = false; cancelRestores();
+  requestAnimationFrame(() => requestAnimationFrame(() => { userMoved = false; smartFit(); }));
   showCamButtons(); syncUrl();
 };
 $("iso").onclick = () => setCamera("isometric");
