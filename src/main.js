@@ -616,7 +616,21 @@ function renderPackInfo() {
     (r.framed ? `<p>${r.framed} framed drawer material set${r.framed === 1 ? "" : "s"} composited${r.framedMissing?.length ? `; not found: ${r.framedMissing.map(esc).join(", ")}` : ""}</p>` : "") +
     (r.notes?.length ? `<p class="dim">${r.notes.map(esc).join("<br>")}</p>` : "");
 }
-async function showUsage() { const u = await usage(); $("packUsage").textContent = u.files ? `${u.files} files, ${(u.bytes / 1e6).toFixed(0)} MB kept` : "nothing kept"; }
+/** What this browser keeps for Blockscope: the downloaded files, and what the renderer keeps besides (the built packs,
+ *  texture atlases and block shapes; a renderer without storageUsage counts none). */
+async function showUsage() {
+  const u = await usage(), r = await Promise.resolve(SchematicRenderer.storageUsage?.()).catch(() => null);
+  const mb = (b) => `${(b / 1e6).toFixed(0)} MB`, n = (k, one, many) => `${k} ${k === 1 ? one : many}`;
+  const built = r ? [r.packs.count && n(r.packs.count, "pack", "packs"), r.atlases.count && n(r.atlases.count, "atlas", "atlases"),
+    r.shapes.count && "block shapes", r.packCopies.count && n(r.packCopies.count, "old pack copy", "old pack copies")].filter(Boolean) : [];
+  // one short line (the panel is narrow), the parts in its tooltip
+  const line = [u.files ? `${mb(u.bytes)} downloads` : "", r?.bytes ? `${mb(r.bytes)} built` : ""].filter(Boolean);
+  const detail = [u.files ? `${n(u.files, "downloaded file", "downloaded files")}, ${mb(u.bytes)}` : "",
+    r?.bytes ? `built from them: ${new Intl.ListFormat("en", { type: "conjunction" }).format(built)}, ${mb(r.bytes)}` : ""].filter(Boolean);
+  const el = $("packUsage");
+  el.textContent = line.length ? `kept: ${line.join(", ")}` : "nothing kept";
+  el.title = detail.join("\n");
+}
 $("packDetails").addEventListener("toggle", () => { if ($("packDetails").open) { showUsage(); readPackReport(); } });
 /** Makes the loaded file's pack current: the renderer's when it holds it, else built. */
 async function ensurePack() {
@@ -651,6 +665,8 @@ $("packFile").onchange = (ev) => { const f = ev.target.files?.[0]; if (f) usePac
 $("packDefault").onclick = () => useSource(null);
 $("packForget").onclick = async () => {
   await clearStore("files"); await clearStore("jars"); await clearStore("meta");
+  // what the renderer made from the packs and keeps too: texture atlases and block shapes (made again on the next load)
+  try { await SchematicRenderer.clearAssetCaches?.(); } catch (e) { console.warn("[blockscope] could not clear the renderer's caches", e); }
   try { localStorage.removeItem(PACK_CONSENT); } catch {}
   const rpm = packManager(renderer);
   if (rpm) for (const p of rpm.getAllPacks().filter((x) => x.name.startsWith(PACK_PREFIX) && x.name !== currentPack)) await rpm.removePack(p.id);
@@ -664,9 +680,11 @@ async function startRenderer() {
   currentPack = await packName(file.schem, source);
   await tidyRendererPacks(currentPack);
   status("loading the pack and the schematic…", "busy");
+  // No file here: the first goes in once the renderer is up (onRendererInitialized), as every later one does. Handed to
+  // the constructor it was built without its cell groups, and setting them then built the whole file a second time.
   renderer = new SchematicRenderer(
     canvas,
-    { [SCHEM_ID]: () => renderBytes() },
+    {},
     { [currentPack]: () => buildPackForFile(currentPack) },
     {
       backgroundColor: BG,
@@ -674,6 +692,9 @@ async function startRenderer() {
       showAxes: false,
       enableDragAndDrop: false,   // the page reads dropped files itself (schematics in memory, packs through Packrat)
       enableGizmos: false,
+      // One mesh worker: a build (batched, the default) meshes on one worker, and every worker in the pool holds its own
+      // copy of the palette's geometry (the default pool of up to 8 kept ~340 MB on the landscapes for nothing).
+      wasmMeshBuilderOptions: { maxWorkers: 1 },
       // shulker boxes and the lectern's book from the pack's models (pack/entities.js: the boxes' color and facing, the
       // book on the lectern's top), not the renderer's own meshes
       blockEntityModels: { ...Object.fromEntries(["", ...DYES].map((c) => [`minecraft:${c ? `${c}_` : ""}shulker_box`, null])), "minecraft:lectern": null },
@@ -688,16 +709,7 @@ async function startRenderer() {
       cameraOptions: { position: [30, 25, 40], useTightBounds: true },
       callbacks: {
         onResourcePackLoaded: () => status("pack loaded, meshing…", "busy"),
-        onSchematicLoaded: () => {
-          status(`${schemName} parsed, building meshes…`, "busy");
-          // the renderer holds the file the load was for now
-          // (the first load only: a later loadSchematic does not call this, its own resolving does: loadArrived)
-          loaded.arrived(null, askedKey());
-          // a whole file: the renderer gets its cell groups, and draws what is asked for now from its first build
-          const so = schematicObject();
-          if (!so?.showCells || !so?.setCellGroups) loaded.live = loaded.canFilter = false;
-          else { so.setCellGroups(cellGroupsNow()); so.showCells(rangeNow(), hiddenGroupsNow()); }
-        },
+        onRendererInitialized: () => { loadFirstFile(); },
         onSchematicRendered: () => {
           // a build of a file no longer open (a rebuild of it still running when another was opened) changes nothing
           if (loaded.file !== file) return;
@@ -730,6 +742,17 @@ async function startRenderer() {
   canvas.schematicRenderer = renderer; // handy in the console
   renderer.eventEmitter?.once?.("schematicRendered", () => keepBaseLowest(renderer).catch(() => {}));
   renderer.eventEmitter.on("simulationSynced", () => { const so = schematicObject(); so?.rebuildMesh?.(); const sm = renderer.simulationManager; if (sm) simInfo(`tick ${sm.getState().tickCount}`); });
+}
+/** The first file, once the renderer is up: loaded with its cell groups and what to show (loadIntoRenderer), so its
+ *  first build is its only one. A renderer without showCells (an older one) then loads every file cut. */
+async function loadFirstFile() {
+  if (loaded.file || loaded.pending) return;   // a file opened while the renderer started is loading already
+  let rendered = false;
+  renderer.eventEmitter?.once?.("schematicRendered", () => { rendered = true; });
+  try { await loadIntoRenderer(); } catch (e) { status(`${schemName}: ${e.message}`, "err"); return; }
+  const so = schematicObject();
+  if (!so?.showCells || !so?.setCellGroups) loaded.live = loaded.canFilter = false;
+  if (!rendered && loaded.file === file) status(`${schemName} parsed, building meshes…`, "busy");
 }
 /** Opens a file record (a plan file or one from disk): the first starts the renderer, a later one replaces the file
  *  and switches the pack when its mods differ. */
@@ -1439,7 +1462,7 @@ async function reloadLayers(what) {
   applyLayers();
   hideGhost(); showMatCells(null);
   const so = schematicObject();
-  // a whole file of this one on its way: the renderer shows what is asked for once it is in (onSchematicLoaded)
+  // a whole file of this one on its way: the renderer shows what is asked for once it is in (loadArrived)
   if (loaded.coming(file) && !typesOutsideGroups()) return;
   if (canShowNow(so)) {
     if (await so.showCells(rangeNow(), hiddenGroupsNow())) { layersShown(); return; }

@@ -234,7 +234,8 @@ publishes them is not part of this repository.
 
 The site serves none of the game's or the mods' assets. Your browser downloads the Minecraft client jar from
 Mojang's servers, as a launcher does, and the mod jars from Modrinth by the hashes the pack lists, and keeps them
-in its own storage (File, Resource pack, Forget downloads clears it). The Modrinth API is called on your action:
+in its own storage, with the packs, texture atlases and block shapes built from them (File, Resource pack shows how
+much; Forget downloads clears it, all but the pack in use). The Modrinth API is called on your action:
 one batched lookup of the pack's file hashes.
 
 Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft.
