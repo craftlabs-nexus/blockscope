@@ -42,8 +42,8 @@ one for the Roof toggle and one for Inspect.
 - **Changes draw at once.** The renderer holds the whole file, each cell labeled with its part, kinds and type, and
   draws the layers, parts, kinds and types asked for without loading the file again (a few milliseconds; a new
   combination's hidden faces, the ones the hidden cells covered, a little longer): only opening another file reloads.
-  This takes a renderer with `showCells` (the checkout beside this one, `npm run dev:local`, until its next release);
-  with the published 1.8.1 every change loads the file again, with only what is shown in it.
+  This takes a renderer with `showCells` (1.9 and later); with an older one every change loads the file again, with
+  only what is shown in it.
 - **The view.** View (fit to the fronts, perspective, isometric or top: a flat plan straight down, every block the
   same size, drag pans, Q / E turn it a quarter, a block grid; Shot, Build, the shell toggles), Layers (all,
   single, below, above, a slider; PageUp / PageDown or [ ] step to the next layer that changes the view, passing
