@@ -4,6 +4,7 @@
 // the renderer is rebuilt by its own `build:watch` and the page reloads when a rebuild has finished writing.
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -15,6 +16,15 @@ const rendererDist = path.join(renderer, "dist");
 const ANSI = /\x1b\[[0-9;]*m/g;
 const tag = (name, color) => (line) => console.log(`\x1b[${color}m[${name}]\x1b[0m ${line}`);
 const say = tag("dev:local", 36);
+
+// WSL with the checkouts on a Windows drive (/mnt/c/…): file events never arrive there, whether the file is saved from
+// Windows or from WSL, so a watcher sees no change and the renderer is never rebuilt. The watchers poll instead.
+// BLOCKSCOPE_POLL=1 or 0 forces it either way.
+const onWindowsDrive = process.platform === "linux" && /microsoft/i.test(os.release())
+  && [HERE, renderer, packrat].some((dir) => /^\/mnt\/[a-z]\//i.test(dir));
+const poll = process.env.BLOCKSCOPE_POLL ? process.env.BLOCKSCOPE_POLL === "1" : onWindowsDrive;
+const POLL_MS = 300;
+if (poll) say(`polling for file changes every ${POLL_MS} ms${onWindowsDrive ? " (WSL on a Windows drive: file events do not arrive there)" : ""}`);
 
 // Each checkout needs its own node_modules: the first run installs them.
 for (const [name, dir] of [["schematic-renderer", renderer], ["packrat", packrat]]) {
@@ -34,7 +44,9 @@ let reload = null; // set with it: reloads the page after a renderer build
 
 // The renderer's watch build, its output trimmed to what changed and whether it built.
 const log = tag("renderer", 35);
-const watcher = spawn(process.execPath, [path.join(renderer, "node_modules", "vite", "bin", "vite.js"), "build", "--watch", "--mode", "lib-watch"], { cwd: renderer, stdio: ["ignore", "pipe", "pipe"] });
+// (its Rollup watcher is chokidar 3, which takes polling from the environment)
+const pollEnv = poll ? { CHOKIDAR_USEPOLLING: "1", CHOKIDAR_INTERVAL: String(POLL_MS) } : {};
+const watcher = spawn(process.execPath, [path.join(renderer, "node_modules", "vite", "bin", "vite.js"), "build", "--watch", "--mode", "lib-watch"], { cwd: renderer, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, ...pollEnv } });
 let onBuilt = () => {};
 const firstBuild = new Promise((resolve) => { onBuilt = resolve; });
 let buffered = "";
@@ -77,7 +89,7 @@ server = await createServer({
   configFile: path.join(HERE, "vite.config.mjs"),
   // The renderer's dist/ changes file by file while it is written: it is not watched, and the page reloads once the
   // build says it is done.
-  server: { watch: { ignored: [rendererDist.replaceAll("\\", "/") + "/**"] } },
+  server: { watch: { ignored: [rendererDist.replaceAll("\\", "/") + "/**"], ...(poll && { usePolling: true, interval: POLL_MS }) } },
 });
 reload = () => {
   server.moduleGraph.invalidateAll();

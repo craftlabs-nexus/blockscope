@@ -133,6 +133,11 @@ by its own `npm run build:watch` (the ES build with source maps, about 7 s) and 
 done. `package.json` is untouched: `npm run dev`, `npm run build` and the deployed site use the published packages.
 `BLOCKSCOPE_LINK=1 npm run build` builds the site against the checkouts (the renderer's `dist/` as last built).
 
+Under WSL with the checkouts on a Windows drive (`/mnt/c/…`), file events never arrive, so `dev:local` has its
+watchers poll for changes instead (every 300 ms; `BLOCKSCOPE_POLL=1` or `0` forces it either way). Each checkout's
+`node_modules` needs the native packages for the system it runs on: one installed from Windows has only the Windows
+builds of esbuild and SWC, and the renderer's build then fails in WSL.
+
 ## Parameters
 
 | Parameter | Effect |
