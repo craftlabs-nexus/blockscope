@@ -207,6 +207,23 @@ is checked against its hash. The download prompt names the jars "as the file lis
 Sponge's own `RequiredMods` (the mod ids) and a `Description`, which shows in the file name's tooltip. The storage
 plan's writer pins the jars from its pack (`storage-plan/pack-mods.json`); the hall lists 13 mods.
 
+## Paintings in the file
+
+Immersive Paintings are entities whose pictures live on the game's server, so a schematic shows only where they hang.
+A plan may bring them in `<name>.paintings.json` beside it (a file opened by name from the plans folder), or carry them
+itself, so a file opened from disk or dropped shows them too: a `Paintings` compound beside `BlockInfo` (in a Sponge
+file's `Metadata`, at the root of the other formats). Version 1:
+
+| Key | Type | Meaning |
+|---|---|---|
+| `Version` | int | 1 |
+| `List` | list of compounds | per painting: `Label` (string), `Name` (string: the painting's id, `arboretum:name-board`), `Pos` (list of 3 doubles: its centre on the wall's face, world coordinates), `W`, `H` (ints: its size in blocks), `Dir` (string `N`, `S`, `E` or `W`: the way it faces) and `Image` (byte array: the PNG) |
+
+A paintings JSON beside the file wins; the file's own are drawn otherwise (`formats.js` `readPaintings`), their
+images as blob URLs. The CraftLabs storage plan's writer (`storage-plan/schemlib.mjs` `paintingsInfo`) writes it into
+all three formats when its caller passes the paintings: the arboretum's valley carries its four, about 340 KB as
+palette PNGs.
+
 ## Deploying (Cloudflare Workers, static assets)
 
 The site is static: a Worker with static assets and no script (`wrangler.jsonc`, `assets.directory` `./dist`).

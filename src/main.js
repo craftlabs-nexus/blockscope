@@ -224,9 +224,20 @@ function setFile(f, { fromUrl = false } = {}) {
   mats.fileChanged();
 }
 /** Reads a schematic file's bytes into the page's file record. */
+const embeddedUrls = [];   // the blob URLs of the last file's own painting images (revoked when another is read)
 async function readFile(rec) {
   status(`reading ${rec.name}…`, "busy");
   const schem = await Schematic.load(rec.bytes, rec.name);
+  // the paintings: the plan's paintings JSON when one came with it, else the ones the file carries (images as blob URLs)
+  for (const u of embeddedUrls.splice(0)) URL.revokeObjectURL(u);
+  if (!rec.paintings?.length && schem.paintings?.length) {
+    const paintings = schem.paintings.map(({ bytes, ...p }) => {
+      const img = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
+      embeddedUrls.push(img);
+      return { ...p, img, embedded: true };
+    });
+    rec = { ...rec, paintings, paintingsBase: location.href };
+  }
   // the file's hash: what the materials list keeps the person's have values under
   let hash = null;
   try { hash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", rec.bytes))].slice(0, 12).map((b) => b.toString(16).padStart(2, "0")).join(""); } catch {}
@@ -429,7 +440,7 @@ function renderUnknown() {
 }
 $("unknownChip").onclick = () => { $("fileGrp").open = true; $("unknownDetails").open = true; $("unknownDetails").scrollIntoView({ block: "nearest" }); };
 
-// Immersive Paintings (entities, not in the file): planes from the plan's paintings JSON (paintings.js).
+// Immersive Paintings (entities): planes from the plan's paintings JSON, or the file's own Paintings (paintings.js).
 function buildOverlayPaintings() {
   const [lo, hi] = shownRange();
   const placed = buildPaintings({ group: group(), paintings: file?.paintings ?? [], base: file?.paintingsBase, offset: info.offset, lo, hi, redraw, isHidden: cellHidden });
@@ -1088,7 +1099,7 @@ function describeBlock(so, x, y, z) {
     const k = `${x},${y},${z}`, s = signAt.get(k), p = paintingAt.get(k);
     const sideText = (t) => `"${t.lines.filter(Boolean).join(" / ") || " "}" in ${t.color.replace("_", " ")}${t.glow ? ", glowing" : ""}`;
     const extra = s && b ? { kind: "sign", quote: s.lines.filter(Boolean).join(" / "), text: `front ${sideText(s)}${s.back ? `; back ${sideText(s.back)}` : "; back empty"}${s.waxed ? "; waxed (no edits)" : ""}` }
-      : p ? { kind: "painting", quote: p.label, text: `Immersive Painting "${p.label}", ${p.w}×${p.h} blocks, ${p.img.replace(/^paintings\//, "")}, facing ${({ N: "north", S: "south", E: "east", W: "west" })[p.dir] ?? p.dir}; hangs on this block (placed by hand, not in the file)` } : null;
+      : p ? { kind: "painting", quote: p.label, text: `Immersive Painting "${p.label}", ${p.w}×${p.h} blocks, ${p.embedded ? "its image in the file" : p.img.replace(/^paintings\//, "")}, facing ${({ N: "north", S: "south", E: "east", W: "west" })[p.dir] ?? p.dir}; hangs on this block (placed by hand, not in the file)` } : null;
     return { id, state, pos: `x ${x + ox}  y ${y + oy}  z ${z + oz}  (file ${x},${y},${z})`, part, extra, frame: frame ?? part?.frame ?? null, hidden, kinds, cell: { x, y, z }, world: [x + ox, y + oy, z + oz] };
   } catch (e) { return { id: `could not read the block: ${e.message}`, state: [], pos: "", part: null, extra: null, frame: null, hidden: null, cell: null, world: null }; }
 }

@@ -178,6 +178,24 @@ export function readMods(value) {
 const list_ = list;
 
 /**
+ * The paintings a file carries (a Paintings compound, version 1, in a Sponge file's Metadata or at the root of any
+ * format), as the overlay draws them, or an empty list: [{ label, name, x, y, z, w, h, dir, bytes }], world
+ * coordinates of each one's centre on its wall's face, `bytes` its PNG (Uint8Array). The page draws these where no
+ * <name>.paintings.json comes beside the file (one opened from disk or dropped has none).
+ */
+export function readPaintings(value) {
+  const r = value?.Schematic ?? value;
+  const p = r?.Metadata?.Paintings ?? r?.Paintings;
+  if (!p || num(p.Version) !== 1) return [];
+  const str = (v) => (typeof v === "string" ? v : v?.v !== undefined ? String(v.v) : "");
+  return list(p.List).map((e) => {
+    const pos = list(e.Pos).map(num), img = e.Image?.v ?? e.Image;
+    const bytes = img ? new Uint8Array(img.buffer, img.byteOffset, img.length) : null;
+    return { label: str(e.Label), name: str(e.Name), x: pos[0], y: pos[1], z: pos[2], w: num(e.W), h: num(e.H), dir: str(e.Dir), bytes };
+  }).filter((q) => q.bytes?.length && [q.x, q.y, q.z, q.w, q.h].every(Number.isFinite) && /^[NSEW]$/.test(q.dir));
+}
+
+/**
  * What a file says about itself, read from its own root before it is turned into a Sponge one: { name, author,
  * description, created, modified (ms since 1970, or null), dataVersion, formatVersion (Sponge's or Litematica's
  * Version), entities (mobs, item frames, paintings and the like: the file's Entities, not its block entities),
