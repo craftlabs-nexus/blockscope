@@ -1,4 +1,4 @@
-// `npm run dev:local`: the dev server with the renderer and Packrat from the checkouts beside this one
+// `pnpm run dev:local`: the dev server with the renderer and Packrat from the checkouts beside this one
 // (../schematic-renderer, ../packrat; BLOCKSCOPE_RENDERER, BLOCKSCOPE_PACKRAT to point elsewhere), so a change in
 // either shows here without publishing. Packrat's TypeScript source is served as it is (a change reloads at once);
 // the renderer is rebuilt by its own `build:watch` and the page reloads when a rebuild has finished writing.
@@ -34,7 +34,7 @@ for (const [name, dir] of [["schematic-renderer", renderer], ["packrat", packrat
   }
   if (!fs.existsSync(path.join(dir, "node_modules"))) {
     say(`installing ${name}'s dependencies (first run)...`);
-    const r = spawnSync("npm", ["install"], { cwd: dir, stdio: "inherit", shell: process.platform === "win32" });
+    const r = spawnSync("pnpm", ["install"], { cwd: dir, stdio: "inherit", shell: process.platform === "win32" });
     if (r.status !== 0) process.exit(r.status ?? 1);
   }
 }

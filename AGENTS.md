@@ -6,8 +6,8 @@ waits for it, frames a block or a part and takes a picture of it. What the viewe
 ## 1. The dev server
 
 ```bash
-npm run dev:local   # the renderer and Packrat from local checkouts (README, "Running it")
-npm run dev         # or: the published packages
+pnpm run dev:local  # the renderer and Packrat from local checkouts (README, "Running it")
+pnpm run dev        # or: the published packages
 ```
 
 Both serve http://localhost:5180 (the port is fixed). If it answers already, a server is running: use it rather than
@@ -100,8 +100,8 @@ For example, one part alone, framed: `?agent=1&schem=<file>&part=<part>&focus=<p
   pack's report (`[blockscope] pack built`).
 - **Stuck at "starting…" and nothing in the console**: a module failed to load; in the browser,
   `performance.getEntriesByType("resource").filter((e) => e.responseStatus >= 400)` names it. A 504 on
-  `node_modules/.vite*/deps/…` means Vite's dependency cache moved under the server: restart `npm run dev:local` (or
-  `npm run dev`).
+  `node_modules/.vite*/deps/…` means Vite's dependency cache moved under the server: restart `pnpm run dev:local` (or
+  `pnpm run dev`).
 - **`ready()` times out**: a first download on a slow line (raise the timeout), or the pack failed (the status line).
 - **The camera is not where you put it**: a view not moved yet is framed again after a change of layers, parts or
   shell (as after a load), and opening a file frames the new one; wait for `nextRender()` (or use `focusPart`, which

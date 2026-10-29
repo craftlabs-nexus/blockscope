@@ -41,9 +41,9 @@ function servePlans(root) {
 // copying without). The built site sends the same headers (public/_headers).
 const ISOLATION = { "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Embedder-Policy": "require-corp" };
 
-// `npm run dev:local` (BLOCKSCOPE_LINK set): the renderer and Packrat from the checkouts beside this one instead of
+// `pnpm run dev:local` (BLOCKSCOPE_LINK set): the renderer and Packrat from the checkouts beside this one instead of
 // node_modules, so a change there shows here without publishing. Packrat is served from its TypeScript source; the
-// renderer from its dist/, which its `npm run build:watch` keeps current (its source needs its own Vite plugins).
+// renderer from its dist/, which its `pnpm run build:watch` keeps current (its source needs its own Vite plugins).
 // One three.js and one Nucleation still: the renderer's bare imports resolve from this project.
 function linkedLibs(env) {
   if (!env.BLOCKSCOPE_LINK) return null;
@@ -63,7 +63,7 @@ function linkedLibs(env) {
     },
     fsAllow: [searchForWorkspaceRoot(HERE), renderer, packrat],
     // Its own pre-bundled dependencies (Packrat's zod and smol-toml from its checkout, not the published Packrat):
-    // sharing node_modules/.vite with `npm run dev` let either one rewrite the other's, and the page then asked for
+    // sharing node_modules/.vite with `pnpm run dev` let either one rewrite the other's, and the page then asked for
     // files the cache no longer had (504) and never started.
     cacheDir: path.join(HERE, "node_modules", ".vite-linked"),
   };

@@ -4,6 +4,7 @@
   "version": "0.2.0",
   "type": "module",
   "license": "AGPL-3.0-only",
+  "packageManager": "pnpm@12.14.0",
   "description": "A static schematic viewer: Minecraft schematics with modded blocks, drawn from a resource pack built in the browser from Mojang's and Modrinth's own downloads",
   "repository": {
     "type": "git",

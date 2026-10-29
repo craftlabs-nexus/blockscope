@@ -101,13 +101,14 @@ one for the Roof toggle and one for Inspect.
 ## Running it
 
 ```bash
-npm install
-npm run dev        # http://localhost:5180
-npm test           # the NBT codec, the formats and the schematic preparation (node --test)
-npm run build      # the static site in dist/
+pnpm install
+pnpm run dev       # http://localhost:5180
+pnpm test          # the NBT codec, the formats and the schematic preparation (node --test)
+pnpm run build     # the static site in dist/
 ```
 
-Node 20 or later. The dev server can also serve a folder of plan files read-only at `/plans/` (schematics,
+Node 20 or later and [pnpm](https://pnpm.io/) (`npm install -g pnpm`; the version is in `package.json`'s
+`packageManager`). The dev server can also serve a folder of plan files read-only at `/plans/` (schematics,
 `.paintings.json`, painting images): set `BLOCKSCOPE_PLANS` to it, in the environment or a `.env.local`
 (git ignores it), and `?schem=<name>` opens a file from it; a bare name is also looked for in its `fixtures/` and
 `framing-options/` subfolders. `VITE_DEFAULT_PLAN` there names the file opened without `?schem=`. Without a folder,
@@ -125,18 +126,19 @@ To change the renderer or Packrat and see it here without publishing, check them
 (`../schematic-renderer`, `../packrat`; `BLOCKSCOPE_RENDERER`, `BLOCKSCOPE_PACKRAT` to point elsewhere) and run:
 
 ```bash
-npm run dev:local  # http://localhost:5180, the first run installs both checkouts' dependencies
+pnpm run dev:local # http://localhost:5180, the first run installs both checkouts' dependencies
 ```
 
 Packrat's TypeScript source is served as it is, so a change there reloads the page at once. The renderer is rebuilt
-by its own `npm run build:watch` (the ES build with source maps, about 7 s) and the page reloads when the build is
-done. `package.json` is untouched: `npm run dev`, `npm run build` and the deployed site use the published packages.
-`BLOCKSCOPE_LINK=1 npm run build` builds the site against the checkouts (the renderer's `dist/` as last built).
+by its own `pnpm run build:watch` (the ES build with source maps, about 7 s) and the page reloads when the build is
+done. `package.json` is untouched: `pnpm run dev`, `pnpm run build` and the deployed site use the published packages.
+`BLOCKSCOPE_LINK=1 pnpm run build` builds the site against the checkouts (the renderer's `dist/` as last built).
 
 Under WSL with the checkouts on a Windows drive (`/mnt/c/…`), file events never arrive, so `dev:local` has its
 watchers poll for changes instead (every 300 ms; `BLOCKSCOPE_POLL=1` or `0` forces it either way). Each checkout's
-`node_modules` needs the native packages for the system it runs on: one installed from Windows has only the Windows
-builds of esbuild and SWC, and the renderer's build then fails in WSL.
+`pnpm-workspace.yaml` installs a flat `node_modules` with the Windows and the Linux x64 builds of the native packages
+(esbuild, Rollup, SWC, workerd) side by side, so a checkout installed from either system runs from both. npm kept
+only the installing system's builds, and the renderer's build then failed on the other.
 
 ## Parameters
 
@@ -203,10 +205,12 @@ plan's writer pins the jars from its pack (`storage-plan/pack-mods.json`); the h
 The site is static: a Worker with static assets and no script (`wrangler.jsonc`, `assets.directory` `./dist`).
 Cloudflare's Git integration (Workers Builds) builds and deploys it from this repository: branch `master`, build
 command `npm run build`, deploy command `npx wrangler deploy`, preview command the default (`npx wrangler preview`)
-for other branches; no build variables (`.node-version` pins Node 24; Node 20 or later works). `public/_headers` sets the
-cross-origin isolation headers, and a path that is no file answers 404. Check a build locally with `npm run build`
-then `npx wrangler dev` (or `npx wrangler deploy --dry-run`). The site serves no plan files of its own: they are in
-the files bucket (below), its plans base, and it opens the Gull Rock lighthouse (`gull-rock.schem`) by default.
+for other branches; no build variables (`.node-version` pins Node 24; Node 20 or later works). It installs with pnpm,
+as `pnpm-lock.yaml` is the lockfile, at the version `package.json`'s `packageManager` names. `public/_headers` sets the
+cross-origin isolation headers, and a path that is no file answers 404. Check a build locally with `pnpm run build`
+then `pnpm exec wrangler dev` (or `pnpm exec wrangler deploy --dry-run`). The site serves no plan files of its own:
+they are in the files bucket (below), its plans base, and it opens the Gull Rock lighthouse (`gull-rock.schem`) by
+default.
 
 ## Hosted designs
 
@@ -231,7 +235,7 @@ publishes them is not part of this repository.
 | `src/materials/` | the materials list: the recipe book read from the jars (`book.js`), blocks to items, counting and rolling up (`engine.js`, no DOM), item icons from the pack's textures (`icons.js`), the group and the sheet (`panel.js`) |
 | `src/pack/` | the pack: sources (packwiz or a dropped pack), the Mojang client jar, the build and the generated models, the page's IndexedDB, the renderer's stored packs |
 | `vite.config.mjs` | the dev server (the plans route, cross-origin isolation headers, the checkouts with `BLOCKSCOPE_LINK`) |
-| `scripts/dev-local.mjs` | `npm run dev:local`: the renderer's watch build and the dev server against the checkouts beside this one |
+| `scripts/dev-local.mjs` | `pnpm run dev:local`: the renderer's watch build and the dev server against the checkouts beside this one |
 | `public/_headers` | the same headers for Cloudflare Pages |
 | `.env.production` | the site's plans base (the files bucket) and the file it opens by default |
 
