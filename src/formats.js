@@ -179,20 +179,20 @@ const list_ = list;
 
 /**
  * The paintings a file carries (a Paintings compound, version 1, in a Sponge file's Metadata or at the root of any
- * format), as the overlay draws them, or an empty list: [{ label, name, x, y, z, w, h, dir, bytes }], world
- * coordinates of each one's centre on its wall's face, `bytes` its PNG (Uint8Array). The page draws these where no
- * <name>.paintings.json comes beside the file (one opened from disk or dropped has none).
+ * format; README, "Paintings in the file"), as the overlay draws them, or an empty list: [{ label, name, x, y, z, w, h,
+ * dir, bytes }], world coordinates of each one's centre on its wall's face, `bytes` its picture (a PNG, Uint8Array; the
+ * same array for paintings that share one).
  */
 export function readPaintings(value) {
   const r = value?.Schematic ?? value;
   const p = r?.Metadata?.Paintings ?? r?.Paintings;
   if (!p || num(p.Version) !== 1) return [];
   const str = (v) => (typeof v === "string" ? v : v?.v !== undefined ? String(v.v) : "");
+  const images = list(p.Images).map((a) => { const b = a?.v ?? a; return b?.length ? new Uint8Array(b.buffer, b.byteOffset, b.length) : null; });
   return list(p.List).map((e) => {
-    const pos = list(e.Pos).map(num), img = e.Image?.v ?? e.Image;
-    const bytes = img ? new Uint8Array(img.buffer, img.byteOffset, img.length) : null;
+    const pos = list(e.Pos).map(num), bytes = images[num(e.Image)] ?? null;
     return { label: str(e.Label), name: str(e.Name), x: pos[0], y: pos[1], z: pos[2], w: num(e.W), h: num(e.H), dir: str(e.Dir), bytes };
-  }).filter((q) => q.bytes?.length && [q.x, q.y, q.z, q.w, q.h].every(Number.isFinite) && /^[NSEW]$/.test(q.dir));
+  }).filter((q) => q.bytes && [q.x, q.y, q.z, q.w, q.h].every(Number.isFinite) && /^[NSEW]$/.test(q.dir));
 }
 
 /**

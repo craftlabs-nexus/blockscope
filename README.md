@@ -115,8 +115,8 @@ pnpm run build     # the static site in dist/
 ```
 
 Node 20 or later and [pnpm](https://pnpm.io/) (`npm install -g pnpm`; the version is in `package.json`'s
-`packageManager`). The dev server can also serve a folder of plan files read-only at `/plans/` (schematics,
-`.paintings.json`, painting images): set `BLOCKSCOPE_PLANS` to it, in the environment or a `.env.local`
+`packageManager`). The dev server can also serve a folder of plan files read-only at `/plans/` (schematics):
+set `BLOCKSCOPE_PLANS` to it, in the environment or a `.env.local`
 (git ignores it), and `?schem=<name>` opens a file from it; a bare name is also looked for in its `fixtures/` and
 `framing-options/` subfolders. `VITE_DEFAULT_PLAN` there names the file opened without `?schem=`. Without a folder,
 open or drop a file.
@@ -210,19 +210,18 @@ plan's writer pins the jars from its pack (`storage-plan/pack-mods.json`); the h
 ## Paintings in the file
 
 Immersive Paintings are entities whose pictures live on the game's server, so a schematic shows only where they hang.
-A plan may bring them in `<name>.paintings.json` beside it (a file opened by name from the plans folder), or carry them
-itself, so a file opened from disk or dropped shows them too: a `Paintings` compound beside `BlockInfo` (in a Sponge
-file's `Metadata`, at the root of the other formats). Version 1:
+A file may carry them, pictures included, as a `Paintings` compound beside `BlockInfo` (in a Sponge file's `Metadata`,
+at the root of the other formats); the page draws each as a plane on its wall. Version 1:
 
 | Key | Type | Meaning |
 |---|---|---|
 | `Version` | int | 1 |
-| `List` | list of compounds | per painting: `Label` (string), `Name` (string: the painting's id, `arboretum:name-board`), `Pos` (list of 3 doubles: its centre on the wall's face, world coordinates), `W`, `H` (ints: its size in blocks), `Dir` (string `N`, `S`, `E` or `W`: the way it faces) and `Image` (byte array: the PNG) |
+| `Images` | list of byte arrays | the distinct pictures, PNG, each once |
+| `List` | list of compounds | per painting: `Label` (string), `Name` (string: the painting's id where it has one, `arboretum:name-board`), `Pos` (list of 3 doubles: its centre on the wall's face, world coordinates), `W`, `H` (ints: its size in blocks), `Dir` (string `N`, `S`, `E` or `W`: the way it faces) and `Image` (int: its picture in `Images`) |
 
-A paintings JSON beside the file wins; the file's own are drawn otherwise (`formats.js` `readPaintings`), their
-images as blob URLs. The CraftLabs storage plan's writer (`storage-plan/schemlib.mjs` `paintingsInfo`) writes it into
-all three formats when its caller passes the paintings: the arboretum's valley carries its four, about 340 KB as
-palette PNGs.
+A file without it shows no paintings. The CraftLabs storage plan's writer (`storage-plan/schemlib.mjs` `paintingsInfo`)
+writes it into all three formats: the storage hall's 23 paintings (13 pictures, about 740 KB), Gull Rock's 2 and the
+arboretum's valley's 4.
 
 ## Deploying (Cloudflare Workers, static assets)
 
@@ -255,7 +254,7 @@ publishes them is not part of this repository.
 | `src/formats.js` | Litematica and structure files turned into Sponge ones, and the block metadata, mod list, description and own details (name, author, dates, data version, entities) a file carries |
 | `src/details.js` | the Schematic group: size, fill, types, mods, game version, format and the file's own details |
 | `src/parts.js`, `src/framed.js`, `src/decorated.js` | the plan's parts and shell from its metadata; framed drawers' ids per material set; patterned banners', sherd pots' and skinned heads' ids per design |
-| `src/plans.js` | plan files: the schematic, its metadata and paintings |
+| `src/plans.js` | plan files: a schematic by name or URL |
 | `src/paintings.js`, `src/buildgif.js` | the paintings overlay; the build animation's framing and GIF encoding |
 | `src/materials/` | the materials list: the recipe book read from the jars (`book.js`), blocks to items, counting and rolling up (`engine.js`, no DOM), item icons from the pack's textures (`icons.js`), the group and the sheet (`panel.js`) |
 | `src/pack/` | the pack: sources (packwiz or a dropped pack), the Mojang client jar, the build and the generated models, the page's IndexedDB, the renderer's stored packs |

@@ -44,7 +44,7 @@ const SCHEM_ID = "blockscope";   // the renderer's name for the loaded file (one
 
 // ---- the loaded file ------------------------------------------------------------------------------------------------
 // file: { name, url (a plan file's; null for one opened from disk), param (what ?schem= says), schem (Schematic),
-// paintings, paintingsBase }. info: its size, offset, roof, shell counts and parts, as the panel reads them. meta:
+// paintings (the file's own, their images as blob URLs) }. info: its size, offset, roof, shell counts and parts, as the panel reads them. meta:
 // the metadata in use (a BlockMeta), the file's own (BlockInfo), else a Litematica
 // file's regions as parts; metaFrom says which, in words.
 let file = null, meta = null, metaFrom = "";
@@ -224,20 +224,18 @@ function setFile(f, { fromUrl = false } = {}) {
   mats.fileChanged();
 }
 /** Reads a schematic file's bytes into the page's file record. */
-const embeddedUrls = [];   // the blob URLs of the last file's own painting images (revoked when another is read)
+const embeddedUrls = [];   // the blob URLs of the last file's painting images (revoked when another is read)
 async function readFile(rec) {
   status(`reading ${rec.name}…`, "busy");
   const schem = await Schematic.load(rec.bytes, rec.name);
-  // the paintings: the plan's paintings JSON when one came with it, else the ones the file carries (images as blob URLs)
+  // the paintings the file carries, their pictures as blob URLs (one each, however many paintings show it)
   for (const u of embeddedUrls.splice(0)) URL.revokeObjectURL(u);
-  if (!rec.paintings?.length && schem.paintings?.length) {
-    const paintings = schem.paintings.map(({ bytes, ...p }) => {
-      const img = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
-      embeddedUrls.push(img);
-      return { ...p, img, embedded: true };
-    });
-    rec = { ...rec, paintings, paintingsBase: location.href };
-  }
+  const urls = new Map();
+  const paintings = (schem.paintings ?? []).map(({ bytes, ...p }) => {
+    if (!urls.has(bytes)) { const u = URL.createObjectURL(new Blob([bytes], { type: "image/png" })); urls.set(bytes, u); embeddedUrls.push(u); }
+    return { ...p, img: urls.get(bytes) };
+  });
+  rec = { ...rec, paintings };
   // the file's hash: what the materials list keeps the person's have values under
   let hash = null;
   try { hash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", rec.bytes))].slice(0, 12).map((b) => b.toString(16).padStart(2, "0")).join(""); } catch {}
@@ -440,10 +438,10 @@ function renderUnknown() {
 }
 $("unknownChip").onclick = () => { $("fileGrp").open = true; $("unknownDetails").open = true; $("unknownDetails").scrollIntoView({ block: "nearest" }); };
 
-// Immersive Paintings (entities): planes from the plan's paintings JSON, or the file's own Paintings (paintings.js).
+// Immersive Paintings (entities): planes from the paintings the file carries (paintings.js).
 function buildOverlayPaintings() {
   const [lo, hi] = shownRange();
-  const placed = buildPaintings({ group: group(), paintings: file?.paintings ?? [], base: file?.paintingsBase, offset: info.offset, lo, hi, redraw, isHidden: cellHidden });
+  const placed = buildPaintings({ group: group(), paintings: file?.paintings ?? [], offset: info.offset, lo, hi, redraw, isHidden: cellHidden });
   paintingAt.clear();
   const [ox, oy, oz] = info.offset;
   for (const { painting, cells } of placed) for (const [x, y, z] of cells) paintingAt.set(`${x - ox},${y - oy},${z - oz}`, painting);
@@ -1099,7 +1097,7 @@ function describeBlock(so, x, y, z) {
     const k = `${x},${y},${z}`, s = signAt.get(k), p = paintingAt.get(k);
     const sideText = (t) => `"${t.lines.filter(Boolean).join(" / ") || " "}" in ${t.color.replace("_", " ")}${t.glow ? ", glowing" : ""}`;
     const extra = s && b ? { kind: "sign", quote: s.lines.filter(Boolean).join(" / "), text: `front ${sideText(s)}${s.back ? `; back ${sideText(s.back)}` : "; back empty"}${s.waxed ? "; waxed (no edits)" : ""}` }
-      : p ? { kind: "painting", quote: p.label, text: `Immersive Painting "${p.label}", ${p.w}×${p.h} blocks, ${p.embedded ? "its image in the file" : p.img.replace(/^paintings\//, "")}, facing ${({ N: "north", S: "south", E: "east", W: "west" })[p.dir] ?? p.dir}; hangs on this block (placed by hand, not in the file)` } : null;
+      : p ? { kind: "painting", quote: p.label, text: `Immersive Painting "${p.label}", ${p.w}×${p.h} blocks, its picture in the file, facing ${({ N: "north", S: "south", E: "east", W: "west" })[p.dir] ?? p.dir}; hangs on this block (placed by hand, not in the file)` } : null;
     return { id, state, pos: `x ${x + ox}  y ${y + oy}  z ${z + oz}  (file ${x},${y},${z})`, part, extra, frame: frame ?? part?.frame ?? null, hidden, kinds, cell: { x, y, z }, world: [x + ox, y + oy, z + oz] };
   } catch (e) { return { id: `could not read the block: ${e.message}`, state: [], pos: "", part: null, extra: null, frame: null, hidden: null, cell: null, world: null }; }
 }
@@ -1877,7 +1875,7 @@ $("buildGif").onclick = () => captureBuild();
 // it carries some (BlockInfo). A resource-pack zip goes on top of the merged pack; a modpack (a folder,
 // an .mrpack, a CurseForge or mods zip) becomes the source of the mod jars.
 async function openLocal(f) {
-  const rec = { name: f.name, url: null, param: null, bytes: new Uint8Array(await f.arrayBuffer()), paintings: [], paintingsBase: null };
+  const rec = { name: f.name, url: null, param: null, bytes: new Uint8Array(await f.arrayBuffer()) };
   // the dev server keeps the last file from disk in this browser's IndexedDB, so a reload opens it again (?local=)
   if (import.meta.env.DEV) storePut("meta", DEV_LOCAL_KEY, { name: rec.name, bytes: rec.bytes });
   await openFile(rec);
@@ -1889,7 +1887,7 @@ const DEV_LOCAL_KEY = "dev:local-file";
 async function reopenLocal(name) {
   const kept = await storeGet("meta", DEV_LOCAL_KEY);
   if (kept?.name !== name) return false;
-  await openFile({ name: kept.name, url: null, param: null, bytes: kept.bytes, paintings: [], paintingsBase: null }, { fromUrl: true });
+  await openFile({ name: kept.name, url: null, param: null, bytes: kept.bytes }, { fromUrl: true });
   return true;
 }
 $("file").onchange = (ev) => {

@@ -1,8 +1,6 @@
-// Paintings overlay: Immersive Paintings are entities placed by hand, so they are not in the schematic. A plan may
-// come with <name>.paintings.json beside it ({ paintings: [{ label, x, y, z, w, h, dir, img }] }, world coordinates,
-// the center of each painting on the wall surface; img relative to the JSON file), which the storage plan's
-// generator writes for the hall. Each is drawn as a textured plane on the wall it hangs on (a tan plate until the
-// image loads).
+// Paintings overlay: Immersive Paintings are entities whose pictures live on the game's server, so a schematic shows
+// only where they hang. A file may carry them (a Paintings compound: formats.js readPaintings; README, "Paintings in
+// the file"): each is drawn as a textured plane on the wall it hangs on (a tan plate until the image loads).
 import * as THREE from "three";
 
 const GROUP = "blockscope_paintings";
@@ -29,7 +27,7 @@ const textureOf = (url) => { if (!textures.has(url)) textures.set(url, loader.lo
 
 /** Draws the paintings in the schematic group `g` and returns the ones placed, each with the world cells of the
  *  blocks it hangs on ({ painting, cells }), so the page can describe a painting when its plane is picked. */
-export function buildPaintings({ group: g, paintings = [], base, offset, lo, hi, redraw = () => {}, isHidden = () => false }) {
+export function buildPaintings({ group: g, paintings = [], offset, lo, hi, redraw = () => {}, isHidden = () => false }) {
   const placed = [];
   if (!g) return placed;
   let group = g.getObjectByName(GROUP);
@@ -43,7 +41,7 @@ export function buildPaintings({ group: g, paintings = [], base, offset, lo, hi,
     const [dx, , dz] = BEHIND[p.dir] ?? [0, 0, 0];
     if (isHidden(Math.floor(p.x) + dx, Math.floor(p.y), Math.floor(p.z) + dz)) continue;
     const mat = new THREE.MeshBasicMaterial({ color: 0xd9c38a, transparent: true, alphaTest: 0.05 }); // one-sided, like the game's
-    if (p.img && base) textureOf(new URL(p.img, base).href).then((tex) => { if (!tex) return; mat.map = tex; mat.color.set(0xffffff); mat.needsUpdate = true; redraw(); });
+    if (p.img) textureOf(p.img).then((tex) => { if (!tex) return; mat.map = tex; mat.color.set(0xffffff); mat.needsUpdate = true; redraw(); });
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(p.w, p.h), mat);
     // a plane faces +z: turn it toward `dir`
     mesh.rotation.y = { S: 0, W: -Math.PI / 2, N: Math.PI, E: Math.PI / 2 }[p.dir] ?? 0;
