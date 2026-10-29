@@ -220,7 +220,8 @@ at the root of the other formats); the page draws each as a plane on its wall. V
 | `List` | list of compounds | per painting: `Label` (string), `Name` (string: the painting's id where it has one, `arboretum:name-board`), `Pos` (list of 3 doubles: its centre on the wall's face, world coordinates), `W`, `H` (ints: its size in blocks), `Dir` (string `N`, `S`, `E` or `W`: the way it faces) and `Image` (int: its picture in `Images`) |
 
 A file without it shows no paintings. The CraftLabs storage plan's writer (`storage-plan/schemlib.mjs` `paintingsInfo`)
-writes it into all three formats: the storage hall's 23 paintings (13 pictures, about 740 KB), Gull Rock's 2 and the
+writes it into all three formats, each picture cut to what the game shows (25 colours, a palette PNG): the storage
+hall's 23 paintings (13 pictures, about 150 KB), Gull Rock's 2 and the
 arboretum's valley's 4.
 
 ## Deploying (Cloudflare Workers, static assets)
