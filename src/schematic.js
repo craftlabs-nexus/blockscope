@@ -7,7 +7,7 @@
 // .schematic) by Nucleation, the renderer's WASM. The block metadata comes from the file when it carries some
 // (BlockInfo, formats.js), and a Litematica file's regions stand in for parts in a file without it.
 import { readNbt, encodeNbt, gzip, decodeVarints, encodeVarints } from "./nbt.js";
-import { formatOf, litematicToSponge, structureToSponge, readBlockInfo, readMods, readDescription } from "./formats.js";
+import { formatOf, litematicToSponge, structureToSponge, readBlockInfo, readMods, readDescription, readFileInfo } from "./formats.js";
 import { framedKind, framedViewerId } from "./framed.js";
 import { decoratedViewerId } from "./decorated.js";
 import { partOf, shellPart } from "./parts.js";
@@ -50,12 +50,15 @@ export class Schematic {
     const format = nbt ? formatOf(nbt.value) : null;
     const info = nbt ? readBlockInfo(nbt.value) : null;
     const mods = nbt ? readMods(nbt.value) : null, description = nbt ? readDescription(nbt.value) : null;
+    // what the file says about itself, from its own root (a converted file: from what Nucleation made of it)
+    let fileInfo = format ? readFileInfo(nbt.value) : null;
     let regions = null, regionOf = null;
     if (format === "litematic") ({ value: nbt.value, regions, regionOf } = litematicToSponge(nbt.value));
     else if (format === "structure") nbt.value = structureToSponge(nbt.value).value;
     else if (format !== "sponge") nbt = await readNbt(await toSponge(u8));
+    fileInfo ??= readFileInfo(nbt.value);
     const s = new Schematic(nbt, name, { format: format ?? "converted", info });
-    s.mods = mods; s.description = description;
+    s.mods = mods; s.description = description; s.fileInfo = fileInfo; s.byteSize = u8.byteLength;
     if (regions?.length > 1) s.#useRegions(regions, regionOf);
     return s;
   }
@@ -71,8 +74,9 @@ export class Schematic {
     this.metaSource = this.meta ? "file" : null;
     /** The parts in the order the file lists them (BlockInfo Parts), or null. */
     this.partOrder = info?.parts ?? null;
-    /** The mod list the file carries (formats.js readMods), or null; its description, or null. */
-    this.mods = null; this.description = null;
+    /** The mod list the file carries (formats.js readMods), or null; its description, or null; what it says about itself
+     *  (formats.js readFileInfo: name, author, dates, data version, entities), or null; its size in bytes, or null. */
+    this.mods = null; this.description = null; this.fileInfo = null; this.byteSize = null;
     this.regions = null;
     // v1/v2 keep Width, Palette and BlockData at the root; v3 nests the root under Schematic and the blocks under Blocks
     this.v3 = !!nbt.value.Schematic;

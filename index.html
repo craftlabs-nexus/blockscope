@@ -73,6 +73,7 @@
     .grp > summary:hover { background: var(--raised); }
     .grp > summary h2 { margin: 0; flex: 1 1 auto; font-size: 10px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--fg-dim); display: flex; align-items: center; gap: 6px; }
     .grp > summary .sum { font-size: 11px; color: var(--fg-dim); font-weight: 400; text-transform: none; letter-spacing: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .grp > summary .sum.mono { font-family: var(--mono); }
     .grp > .in { padding: 2px 10px 9px; }
     .hint { margin: 6px 0 0; font-size: 11px; color: var(--fg-dim); }
     .hint b, .hint kbd { color: var(--fg-key); }
@@ -325,6 +326,13 @@
     </div>
     <div id="packRow" hidden><progress id="packBar"></progress><span id="packText"></span></div>
     <div class="body" id="hudBody">
+      <details class="grp" id="infoGrp" open>
+        <summary title="The file at a glance: its size, how full it is, its blocks and mods, the game version it was saved in, and what it says about itself. Hover a row for what it counts"><h2>Schematic <span class="sum mono" id="infoSum"></span></h2></summary>
+        <div class="in">
+          <div class="props" id="infoProps"></div>
+          <p class="empty" id="infoEmpty">No file open yet.</p>
+        </div>
+      </details>
       <details class="grp" id="viewGrp" open>
         <summary><h2>View</h2></summary>
         <div class="in bar">

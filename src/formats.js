@@ -177,6 +177,33 @@ export function readMods(value) {
 }
 const list_ = list;
 
+/**
+ * What a file says about itself, read from its own root before it is turned into a Sponge one: { name, author,
+ * description, created, modified (ms since 1970, or null), dataVersion, formatVersion (Sponge's or Litematica's
+ * Version), entities (mobs, item frames, paintings and the like: the file's Entities, not its block entities),
+ * requiredMods (Sponge's Metadata RequiredMods) }. Each is null (requiredMods: empty) where the file has none.
+ */
+export function readFileInfo(value) {
+  const format = formatOf(value), r = value?.Schematic ?? value ?? {};
+  const str = (v) => (typeof v === "string" && v.trim() ? v.trim() : null);
+  const time = (v) => { const n = v === undefined || v === null ? NaN : num(v); return Number.isFinite(n) && n > 0 ? n : null; };
+  const int = (v) => { const n = v === undefined || v === null ? NaN : num(v); return Number.isFinite(n) ? n : null; };
+  const count = (v) => (v === undefined || v === null ? 0 : list(v).length);
+  const md = (format === "litematic" ? value.Metadata : r.Metadata) ?? {};
+  const out = { name: str(md.Name), author: str(md.Author), description: str(md.Description), created: null, modified: null, dataVersion: null, formatVersion: int(r.Version), entities: 0, requiredMods: [] };
+  if (format === "litematic") {
+    Object.assign(out, { created: time(md.TimeCreated), modified: time(md.TimeModified), dataVersion: int(value.MinecraftDataVersion) });
+    out.entities = Object.values(value.Regions ?? {}).reduce((n, g) => n + count(g?.Entities), 0);
+  } else if (format === "structure") {
+    Object.assign(out, { author: str(value.author), dataVersion: int(value.DataVersion), entities: count(value.entities) });
+  } else {
+    Object.assign(out, { created: time(md.Date), dataVersion: int(r.DataVersion), entities: count(r.Entities) });
+    out.requiredMods = list(md.RequiredMods).filter((m) => typeof m === "string" && m);
+  }
+  if (out.dataVersion !== null && out.dataVersion <= 0) out.dataVersion = null;
+  return out;
+}
+
 /** A file's description: Sponge's or Litematica's Metadata Description, or null. */
 export function readDescription(value) {
   const r = value?.Schematic ?? value;

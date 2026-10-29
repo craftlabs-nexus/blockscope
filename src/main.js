@@ -22,6 +22,7 @@ import { clear as clearStore, usage, get as storeGet, put as storePut } from "./
 import { resolvePlan, loadPlan, DEFAULT_PLAN, SCHEMATIC_EXT } from "./plans.js";
 import { createMaterials } from "./materials/panel.js";
 import { esc } from "./html.js";
+import { schematicDetails } from "./details.js";
 import { prepareBook } from "./materials/engine.js";
 import { BOOK_FILE } from "./materials/book.js";
 import { stepTarget, filledLayers } from "./layers.js";
@@ -167,6 +168,7 @@ function setFile(f, { fromUrl = false } = {}) {
   $("copyLink").title = f.param ? "Copy a link to this view: file, camera, layers and hidden parts"
     : "A file opened from disk cannot be linked: a link could not bring it back";
   showDownloads(f);
+  showDetails(f.schem);
   const s = f.schem, { counts, parts, roofCover } = s.shellOf(meta);
   shellCells = parts; rowCells.clear(); frontCache = { name: null, dir: null };
   Object.assign(info, s.info(), { shell: counts, roofCover, meta: meta !== null, parts: meta ? partsOf(meta, own ? s.partOrder : null, { origin: s.offset, size: [s.width, s.height, s.length] }) : [] });
@@ -1125,6 +1127,22 @@ function pinWorld(wx, wy, wz) {
 const itemText = (s) => (s.includes("/") ? s : s.replace(/minecraft:/g, ""));
 // a block's kinds in words: "redstone (holds a component), storage"
 const kindsText = (d) => (d.kinds ?? []).map((k) => `${kindName(k.kind).toLowerCase()}${k.why ? ` (${k.why})` : ""}`).join(", ");   // ids without the namespace; a rule list (regexes) as is
+// The Schematic group: the loaded file at a glance (details.js), its size in the heading so it shows when the group is
+// closed. A row's explanation is its tooltip.
+let fileDetails = null;
+function showDetails(s) {
+  fileDetails = schematicDetails(s);
+  $("infoSum").textContent = fileDetails.summary;
+  const list = $("infoProps"); list.replaceChildren();
+  for (const r of fileDetails.rows) {
+    const k = document.createElement("span"); k.className = "k"; k.textContent = r.key;
+    const v = document.createElement("span"); v.className = `v ${r.cls}`.trim(); v.textContent = r.value;
+    v.title = r.title ? `${r.value}\n${r.title}` : r.value; k.title = r.title || "";
+    list.append(k, v);
+  }
+  $("infoEmpty").style.display = fileDetails.rows.length ? "none" : "";
+}
+
 // The Block group is a properties list: only the rows that have something to say, the block's id first, its state as
 // key/value chips, the position, the sign or painting on it, then the metadata (item, frame, owner, role) and a link
 // to its part in the Parts list. Nothing is pinned: a one-line prompt instead.
@@ -2103,6 +2121,7 @@ function agentState() {
     pinned: pinned.cell ? toWorld([pinned.cell.x, pinned.cell.y, pinned.cell.z]) : null,
     camera: cam ? { position: r(cam.position), target: r(ctl?.target), view: topView.on ? "top" : camPreset } : null,
     pack: currentPack, unknownBlocks: unknown.size, url: location.href,
+    details: fileDetails?.data ?? null,
   };
 }
 const partList = () => info.parts.map((p) => ({ name: p.name, blocks: p.count, hidden: hiddenPartSet.has(p.name) }));

@@ -39,6 +39,13 @@ one for the Roof toggle and one for Inspect.
   another region's block); anything else, an MCEdit `.schematic`, by the renderer's WASM (Nucleation). The parts, the
   shell and what each block is for come from the generator's metadata in the file (BlockInfo, below), else a
   Litematica file's regions as its parts. The Parts group's tooltip says which.
+- **The file at a glance.** The Schematic group, first in the panel (`src/details.js`), with the size in its heading
+  so it shows when the group is closed: width × height × length, how many blocks are not air and how full the box is,
+  how many types and block states, the mods whose blocks it uses (the three with the most blocks, the rest in the
+  tooltip), the game version (the mod list's, else the file's data version read as a release: `1.21.1`, `a 1.21.5
+  snapshot`; the mod loader in its tooltip), the format and size on disk, and what the file says about itself where
+  it does: name, author, description, when it was made and changed (Litematica's times, Sponge's `Date`), the mods it
+  says it needs, its world position, and its block entities and entities. A row's tooltip says what it counts.
 - **Changes draw at once.** The renderer holds the whole file, each cell labeled with its part, kinds and type, and
   draws the layers, parts, kinds and types asked for without loading the file again (a few milliseconds; a new
   combination's hidden faces, the ones the hidden cells covered, a little longer): only opening another file reloads.
@@ -228,7 +235,8 @@ publishes them is not part of this repository.
 | `src/layers.js` | where a layer step lands: the nearest layer that changes what is drawn |
 | `src/kinds.js` | kinds and types: each block's kinds in one pass (the redstone and tree neighbour rules), the types, and each cell's group for the renderer |
 | `src/blockmeta.js` | the block metadata (BlockInfo, or a Litematica file's regions) kept as a record index a cell |
-| `src/formats.js` | Litematica and structure files turned into Sponge ones, and the block metadata, mod list and description a file carries |
+| `src/formats.js` | Litematica and structure files turned into Sponge ones, and the block metadata, mod list, description and own details (name, author, dates, data version, entities) a file carries |
+| `src/details.js` | the Schematic group: size, fill, types, mods, game version, format and the file's own details |
 | `src/parts.js`, `src/framed.js`, `src/decorated.js` | the plan's parts and shell from its metadata; framed drawers' ids per material set; patterned banners', sherd pots' and skinned heads' ids per design |
 | `src/plans.js` | plan files: the schematic, its metadata and paintings |
 | `src/paintings.js`, `src/buildgif.js` | the paintings overlay; the build animation's framing and GIF encoding |
