@@ -1,7 +1,7 @@
 {
   "name": "blockscope",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "license": "AGPL-3.0-only",
   "packageManager": "pnpm@12.14.0",
@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "@craftlabs/packrat": "^0.2.0",
-    "@craftlabs/schematic-renderer": "^1.10.0",
+    "@craftlabs/schematic-renderer": "^1.11.0",
     "gif.js.optimized": "^1.0.1",
     "jszip": "^3.10.2",
     "three": "^0.184.0"

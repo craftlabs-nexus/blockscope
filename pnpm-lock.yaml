@@ -170,8 +170,8 @@ importers:
         specifier: ^0.2.0
         version: 0.2.0
       '@craftlabs/schematic-renderer':
-        specifier: ^1.10.0
-        version: 1.10.0
+        specifier: ^1.11.0
+        version: 1.11.0
       gif.js.optimized:
         specifier: ^1.0.1
         version: 1.0.1
@@ -238,8 +238,8 @@ packages:
     resolution: {integrity: sha512-5yEHHNS1zQcAg/IbHIfwwdc8WRnTArZneRFZT0pQwtNGFUSkuGJnw5Hh0F3GKaNef36GirJayubakIIz3HILsQ==}
     engines: {node: '>=20'}
 
-  '@craftlabs/schematic-renderer@1.10.0':
-    resolution: {integrity: sha512-1djt/KVo+Evc0O9I8N0Hgl8jyieq7Vu8NqYCmSX6K3aXxdtPjL/rCpSnQxRVMX6cuQKNKGKlNaUYQhxpKL7f3Q==}
+  '@craftlabs/schematic-renderer@1.11.0':
+    resolution: {integrity: sha512-/Yn2CYPBQ+ldduN/mY9zBu8JbPKybzpOD1Z8XJY2ING6ouIiIQEb+8BI0zRSnjXwVyN0PJZbl++8BJf43NecfQ==}
 
   '@cspotcode/source-map-support@0.8.1':
     resolution: {integrity: sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw==}
@@ -1008,7 +1008,7 @@ snapshots:
       smol-toml: 1.9.1
       zod: 4.6.7
 
-  '@craftlabs/schematic-renderer@1.10.0':
+  '@craftlabs/schematic-renderer@1.11.0':
     dependencies:
       jszip: 3.10.2
       nucleation: 0.2.18

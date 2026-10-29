@@ -14,3 +14,6 @@ verifyDepsBeforeRun: false
 allowBuilds:
   esbuild: false
   workerd: false
+# pnpm holds back a version until it has been out a while; our own packages are taken as soon as they are published.
+minimumReleaseAgeExclude:
+  - "@craftlabs/*"
